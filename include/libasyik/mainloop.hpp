@@ -4,6 +4,7 @@
 
 namespace asyik {
 
+void init();
 void fn(std::string const& str, int n);
 
 }
