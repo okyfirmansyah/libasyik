@@ -1,0 +1,3 @@
+-make aixlog sync asynchronous(sync all sink to a dedicated thread)
+-service::spawn, service::execute, and all similiar functions, should CHECK for thread_id(exception or auto-sync with correct thread)
+
