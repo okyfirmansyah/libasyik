@@ -1,3 +1,0 @@
-[submodule "external/lspdlog"]
-	path = external/lspdlog
-	url = https://github.com/nodefluxio/lspdlog.git
