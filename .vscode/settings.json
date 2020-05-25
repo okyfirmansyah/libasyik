@@ -1,0 +1,10 @@
+{
+    "editor.formatOnSave": true,
+    "clang-format.executable": "clang-format",
+    "cmake.configureSettings": {
+        "BUILD_INTERCHANGE": "ON",
+        "BUILD_SERVER": "ON",
+        "BUILD_EXAMPLE": "ON",
+        "BUILD_PROMETHEUS": "ON"
+    }
+}
