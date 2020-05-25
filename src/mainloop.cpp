@@ -5,17 +5,20 @@
 
 namespace asyik {
 
-void init()
+service::service()
 {
   AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::trace,
                                       AixLog::Type::normal);
+  boost::fibers::use_scheduling_algorithm<boost::fibers::algo::round_robin>();
 }
 
-void fn(std::string const& str, int n)
+service make_service() { return std::move(service()); }
+
+void service::run()
 {
-  for (int i = 0; i < n; ++i) {
-    LOG(INFO) << i << ": " << str << std::endl;
-    boost::this_fiber::sleep_for(std::chrono::seconds(1));
+  while (1) {
+    boost::this_fiber::yield();
+    usleep(1000);
   }
 }
 
