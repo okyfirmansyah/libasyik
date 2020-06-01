@@ -1,3 +1,6 @@
 [submodule "external/aixlog"]
 	path = external/aixlog
 	url = https://github.com/badaix/aixlog.git
+[submodule "external/Catch2"]
+	path = external/Catch2
+	url = https://github.com/catchorg/Catch2.git

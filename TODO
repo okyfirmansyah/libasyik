@@ -1,3 +1,11 @@
+-client connection URL scheme: ^(http\:\/\/|https\:\/\/|ws\:\/\/|wss\:\/\/|)(([^\/\:]+)(:\d{1,5})|([^\/\:]+)())(\/[^\:]*|)$
+-create version.hpp and display string
+-support SSL
+-make http full client(separate connection and request)
+-make class websocket compile time switch between server and client
+-pindahin internal_api ke tiap2 function
+-ability for websocket to add custom header
+-rapihin exceptions
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
 -service::spawn, service::execute, and all similiar functions, should CHECK for thread_id(exception or auto-sync with correct thread)
-
+-move to string_view

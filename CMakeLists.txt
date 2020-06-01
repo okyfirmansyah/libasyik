@@ -4,6 +4,8 @@ project(libasyik)
 set(CMAKE_CXX_STANDARD 14)
 
 add_subdirectory(src)
+add_subdirectory(tests)
+add_subdirectory(external/Catch2)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
@@ -12,3 +14,6 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
                                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
+target_link_libraries(${PROJECT_NAME} libasyik Catch2::Catch2)
+#target_include_directories(${PROJECT_NAME} PRIVATE external/Catch2/include)
+

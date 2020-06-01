@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
-project(libasyik)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_library(${PROJECT_NAME} mainloop.cpp)
+add_library(${PROJECT_NAME} service.cpp http.cpp)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
