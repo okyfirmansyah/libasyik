@@ -55,6 +55,123 @@ namespace asyik
     REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/([^\/\s]+)\/n\/([0-9]+)\/?$)"));
   }
 
+  bool http_analyze_url(string_view url, http_url_scheme &scheme)
+  {
+    static std::regex re(R"(^(http\:\/\/|https\:\/\/|ws\:\/\/|wss\:\/\/|)(([^\/\:]+)(:\d{1,5})|([^\/\:]+)())(\/[^\:]*|)$)",
+                         std::regex_constants::icase);
+    static std::regex re2(R"(^(https|wss)\:\/\/)", std::regex_constants::icase);
+
+    std::smatch m;
+    std::string str{url};
+    if (std::regex_search(str, m, re))
+    {
+      // check if ssl or not ssl
+      if(m[1].str().compare(""))
+      {
+        scheme.is_ssl=
+          std::regex_match(m[1].str(), 
+                           re2);
+          
+      } else
+        scheme.is_ssl = false;
+
+      // is there any port specification or not
+      if(m[3].str().length())
+      {
+        scheme.host=m[3].str();
+        scheme.port=std::atoi(&m[4].str().c_str()[1]);
+      } else
+      {
+        scheme.host=m[5].str();
+        scheme.port=scheme.is_ssl?443:80;
+      }
+
+      scheme.target=m[7].str();
+      if(!scheme.target.length())
+        scheme.target="/";
+      
+      return true;
+    }else return false;
+  }
+
+  TEST_CASE("check http_analyze_url against URL cases")
+  {
+    bool result;
+    http_url_scheme scheme;
+
+    result = http_analyze_url("simple.com", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("simple.com"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==80);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("Http://protspecify.co.id", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("protspecify.co.id"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==80);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("https://prothttps.x.y.z/", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("prothttps.x.y.z"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.is_ssl);
+
+    result = http_analyze_url("https://protandport.x:69", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("protandport.x"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==69);
+    REQUIRE(scheme.is_ssl);
+
+    result = http_analyze_url("simple.x.y.z:443/check", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("simple.x.y.z"));
+    REQUIRE(!scheme.target.compare("/check"));
+    REQUIRE(scheme.port==443);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("http://simple.co.id:443/check", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("simple.co.id"));
+    REQUIRE(!scheme.target.compare("/check"));
+    REQUIRE(scheme.port==443);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("http://10.10.10.1:443/check", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.1"));
+    REQUIRE(!scheme.target.compare("/check"));
+    REQUIRE(scheme.port==443);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("10.10.10.1:443/", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.1"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==443);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("10.10.10.2", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.2"));
+    REQUIRE(!scheme.target.compare("/"));
+    REQUIRE(scheme.port==80);
+    REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("invalid://simple.com:443/check", scheme);
+    REQUIRE(!result);
+
+    result = http_analyze_url("invalid:simple.com:443/check", scheme);
+    REQUIRE(!result);
+
+    result = http_analyze_url("simple.com:443:323/check", scheme);
+    REQUIRE(!result);
+  }
+
   http_server::http_server(struct private_ &&, service_ptr as, const std::string &addr, uint16_t port)
       : service(as)
   {
@@ -151,10 +268,6 @@ namespace asyik
                 if (asyik_req->buffer.size() != 0)
                   throw std::make_exception_ptr(std::runtime_error("unexpected data before websocket handshake!"));
 
-                LOG(INFO) << "\ntarget()=" << req.target() << "\n";
-                LOG(INFO) << "\nmethod_string()=" << req.method_string() << "\n";
-                LOG(INFO) << "\nreq.base().at('Host')=" << req.base().at("Host") << "\n";
-
                 try
                 {
                   if (p->http_server.expired())
@@ -199,12 +312,9 @@ namespace asyik
                 // handle it like a normal HTTP request.
                 auto &res = asyik_req->response.beast_response;
 
-                res.set(http::field::server, "LIBASYIK 0.1.1(Powered by Boost::Beast)");
-                res.set(http::field::content_type, "text/html");
-                res.keep_alive(req.keep_alive());
                 http_response_headers &res_header = res.base();
                 http_response_body &res_body = res.body();
-                asyik_req->response.headers.set(http::field::server, "LIBASYIK 0.1.1(Powered by Boost::Beast)");
+                asyik_req->response.headers.set(http::field::server, LIBASYIK_VERSION_STRING);
                 asyik_req->response.headers.set(http::field::content_type, "text/html");
                 asyik_req->response.beast_response.keep_alive(asyik_req->beast_request.keep_alive());
 
@@ -331,5 +441,12 @@ namespace asyik
     else
       internal::websocket::async_close(*ws_client, cr);
   }
+
+  
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url)
+  {
+    return http_easy_request(as, method, url, "");
+  };
 
 } // namespace asyik

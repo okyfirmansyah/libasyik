@@ -4,7 +4,8 @@
         "BUILD_INTERCHANGE": "ON",
         "BUILD_SERVER": "ON",
         "BUILD_EXAMPLE": "ON",
-        "BUILD_PROMETHEUS": "ON"
+        "BUILD_PROMETHEUS": "ON",
+        "-j": "6"
     },
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "files.associations": {

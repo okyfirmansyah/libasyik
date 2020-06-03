@@ -62,6 +62,27 @@ namespace asyik
                                           const std::string &path,
                                           int timeout = 10);
 
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url);
+  template<typename D>
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url, D &&data);
+
+  template<typename D>
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url, D &&data,
+                                     const std::map<string_view, string_view> &headers);
+
+  struct http_url_scheme
+  {
+    bool is_ssl;
+    std::string host;
+    uint16_t port;
+    std::string target;
+  };
+
+  bool http_analyze_url(string_view url, http_url_scheme &scheme);
+
   namespace internal
   {
     std::string route_spec_to_regex(const std::string &route_spc);
@@ -289,10 +310,15 @@ namespace asyik
       };
     } response;
 
-  private:
+    private:
     boost::beast::flat_buffer buffer;
 
     friend class http_connection;
+
+    template<typename D>
+    friend http_request_ptr http_easy_request(service_ptr as, 
+                                              string_view method, string_view url, D &&data,
+                                              const std::map<string_view, string_view> &headers);
   };
 
   class websocket : public std::enable_shared_from_this<websocket>
@@ -347,7 +373,68 @@ namespace asyik
     bool is_server_connection;
     std::shared_ptr<beast::websocket::stream<ip::tcp::socket>> ws_server;
     std::shared_ptr<beast::websocket::stream<beast::tcp_stream>> ws_client;
-    };
+  };
+
+  template<typename D>
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url, D &&data,
+                                     const std::map<string_view, string_view> &headers)
+  {
+    bool result;
+    http_url_scheme scheme;
+    
+    if(http_analyze_url(url, scheme))
+    {
+      auto req=std::make_shared<http_request>();
+
+      if(scheme.port==80 || scheme.port==443)
+        req->headers.set("Host", scheme.host);
+      else
+        req->headers.set("Host", scheme.host+":"+std::to_string(scheme.port));
+      req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
+      req->headers.set("Content-Type", "text/html");
+
+      // user-overidden headers
+      std::for_each(headers.cbegin(), headers.cend(),
+        [&req](const auto &item)
+        {
+          req->headers.set(item.first, item.second);
+        });
+    
+      req->body=std::forward<D>(data);
+      req->method(method);
+      req->target(scheme.target);
+      req->beast_request.keep_alive(false);
+
+      req->beast_request.prepare_payload();
+      
+      tcp::resolver resolver(as->get_io_service().get_executor());
+      tcp::resolver::results_type results = internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port));
+
+      beast::tcp_stream stream(as->get_io_service().get_executor());
+      
+      internal::socket::async_connect(stream, results);
+      internal::http::async_write(stream, req->beast_request);
+      internal::http::async_read(stream, req->buffer, req->response.beast_response);
+
+      beast::error_code ec;
+      stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+
+      if(ec && ec != beast::errc::not_connected)
+        throw beast::system_error{ec};
+
+      return req;
+    }else 
+      return nullptr;
+  };
+
+  template<typename D>
+  http_request_ptr http_easy_request(service_ptr as, 
+                                     string_view method, string_view url, D &&data)
+  {
+    return http_easy_request(as, method, url, std::forward<D>(data), {});
+  };
+
 } // namespace asyik
 
 #endif

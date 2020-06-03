@@ -86,59 +86,57 @@ TEST_CASE("Create http server and client, do some http communications", "[http]"
   });
 
   server->on_http_request("/post-only/<int>/name/<string>", "POST", [](auto req, auto args) {
-    LOG(INFO) << "\ntarget()=" << req->target() << "\n";
-    LOG(INFO) << "\nmethod_string()=" << req->method() << "\n";
-    LOG(INFO) << "\nreq.base().at('Host')=" << req->headers["host"] << "\n";
-    LOG(INFO) << "\nreq.base().at('x-test')=" << req->headers["x-test"] << "\n";
-
-    LOG(INFO) << "\nreq.base().at('content-length')=" << req->headers["content-length"] << "\n";
-    LOG(INFO) << "\nreq.base().at('content-type')=" << req->headers["content-type"] << "\n";
-    LOG(INFO) << "\nBody=\n"
-              << req->body << "\n";
-
     req->response.headers.set("x-test-reply", "amiiin");
     req->response.headers.set("content-type", "text/json");
-    req->response.body = req->body + "-" + args[1] + "-" + args[2];
+    std::string x_test{req->headers["x-test"]};
+    req->response.body = req->body + "-" + args[1] + "-" + args[2] + "-" + x_test;
     req->response.result(200);
   });
 
   server->on_http_request("/any/<int>/", [](auto req, auto args) {
-    LOG(INFO) << "\ntarget()=" << req->target() << "\n";
-    LOG(INFO) << "\nmethod_string()=" << req->method() << "\n";
-    LOG(INFO) << "\nreq.base().at('Host')=" << req->headers["host"] << "\n";
-    LOG(INFO) << "\nreq.base().at('x-test')=" << req->headers["x-test"] << "\n";
-
-    LOG(INFO) << "\nreq.base().at('content-length')=" << req->headers["content-length"] << "\n";
-    LOG(INFO) << "\nreq.base().at('content-type')=" << req->headers["content-type"] << "\n";
-    LOG(INFO) << "\nBody=\n"
-              << req->body << "\n";
-
-    req->response.headers.set("x-test-reply", "amiiin");
+    req->response.headers.set("x-test-reply", "amiin");
     req->response.headers.set("content-type", "text/json");
     std::string s{req->method()};
-    req->response.body = req->body + "-" + s + "-" + args[1];
+    std::string x_test{req->headers["x-test"]};
+    req->response.body = req->body + "-" + s + "-" + args[1] + "-" + x_test;
     req->response.result(200);
   });
 
-  // asyik::sleep_for(std::chrono::milliseconds(500));
-  // http_request req();
-  // req.headers.set("x-test", "hello");
-  // req.body = "check-";
-  // asyik::http_easy_request(as, "POST", "127.0.0.1:4004/post-only/69/name/listed", req);
+  asyik::sleep_for(std::chrono::milliseconds(100));
+  as->execute([as](){
+    auto req = asyik::http_easy_request(as, "POST", "http://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
+
+    REQUIRE(req->response.result()==200);
+    std::string x_test_reply{req->response.headers["x-test-reply"]};
+    std::string body=req->response.body;
+    REQUIRE(!body.compare("hehe-30-listed-ok"));
+    REQUIRE(!x_test_reply.compare("amiiin"));
+
+    req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/999/");
+    
+    REQUIRE(req->response.result()==200);
+    REQUIRE(!req->response.body.compare("-GET-999-"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
+
+    req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/123/", "", {{"x-test", "sip"}});
+    
+    REQUIRE(req->response.result()==200);
+    REQUIRE(!req->response.body.compare("-GET-123-sip"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
+
+    // negative test
+    req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/not-found");
+    REQUIRE(req->response.result()==404);
+
+    //req = asyik::http_easy_request(as, "GET", "3878sad9das7d97d8safdsfd.com/not-found");
+    //REQUIRE(req->response.result()==404);
+
+    as->stop();
+  });
 
   // auto client = asyik::make_http_connection(as, "127.0.0.1", "80");
-  // asyik::http_request_ptr req("GET", "/");
-  // req.set_header();
-  // req.set_body();
-  // asyik::http_respond_ptr resp = client->send_request(req);
-  // resp->get_http_status();
-  // resp->get_http_body();
-  // resp->get_header();
-
-  // auto {status, body} = asyik::http_easy_request(as, "127.0.0.1:80/trr6/ytt6", req_body);
-  // auto {status, body} = asyik::http_easy_request(as, "127.0.0.1:80/trr6/ytt6", req_body, req_header);
-  // auto {status, body, header} = asyik::http_easy_request(as, "127.0.0.1:80/trr6/ytt6", req_body, req_header);
-
-  as->stop();
+  // auto req=std::make_shared<http_request>();
+  // client->send_request(req);
+  
   as->run();
 }

@@ -22,13 +22,31 @@ namespace asyik
     {
         namespace socket
         {
-            template <typename T, typename K>
-            size_t async_write(T &&s, K &&b)
+            template <typename... Args>
+            size_t async_read(Args &&... args)
+            {
+                boost::fibers::promise<size_t> promise;
+                auto future = promise.get_future();
+                boost::asio::async_read(
+                    std::forward<Args>(args)...,
+                    [prom = std::move(promise)](const boost::system::error_code &ec,
+                                                size_t sz) mutable {
+                        if (!ec)
+                            prom.set_value(sz);
+                        else
+                            prom.set_exception(
+                                std::make_exception_ptr(std::runtime_error("read_error")));
+                    });
+                return future.get();
+            };
+
+            template <typename... Args>
+            size_t async_write(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
                 boost::asio::async_write(
-                    std::forward<T>(s), std::forward<K>(b),
+                    std::forward<Args>(args)...,
                     [prom = std::move(promise)](const boost::system::error_code &ec,
                                                 size_t sz) mutable {
                         if (!ec)
@@ -40,13 +58,13 @@ namespace asyik
                 return future.get();
             };
 
-            template <typename T, typename K>
-            size_t async_read_until(T &&s, K &&b, const char *delim)
+            template <typename... Args>
+            size_t async_read_until(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
                 boost::asio::async_read_until(
-                    std::forward<T>(s), std::forward<K>(b), delim,
+                    std::forward<Args>(args)...,
                     [prom = std::move(promise)](const boost::system::error_code &ec,
                                                 size_t sz) mutable {
                         if (!ec)
