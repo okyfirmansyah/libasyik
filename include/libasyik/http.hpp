@@ -9,11 +9,12 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
 #include "service.hpp"
-#include "internal_api.hpp"
 #include "boost/algorithm/string/predicate.hpp"
+#include "internal/asio_internal.hpp"
 
 namespace fibers = boost::fibers;
 using fiber = boost::fibers::fiber;
+using tcp = boost::asio::ip::tcp;
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace ip = boost::asio::ip;
@@ -40,7 +41,7 @@ namespace asyik
   using http_result = uint16_t;
 
   using http_beast_request = boost::beast::http::request<boost::beast::http::string_body>;
-  using http_beast_response = boost::beast::http::response<http::string_body>;
+  using http_beast_response = boost::beast::http::response<boost::beast::http::string_body>;
   using http_request_headers = http_beast_request::header_type;
   using http_request_body = http_beast_request::body_type::value_type;
   using http_response_headers = http_beast_response::header_type;
@@ -351,12 +352,12 @@ namespace asyik
 
     //API
     std::string get_string();
-    void send_string(const std::string &s);
+    void send_string(string_view s);
     void close(websocket_close_code code)
     {
       close(code, "NORMAL");
     }
-    void close(websocket_close_code code, const std::string &reason);
+    void close(websocket_close_code code, string_view reason);
     http_request_ptr request;
 
   private:

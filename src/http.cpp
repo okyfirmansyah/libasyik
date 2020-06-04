@@ -7,6 +7,7 @@
 #include "catch2/catch.hpp"
 #include "libasyik/common.hpp"
 #include "libasyik/http.hpp"
+#include "libasyik/internal/asio_internal.hpp"
 
 namespace ip = boost::asio::ip;
 using tcp = boost::asio::ip::tcp;
@@ -425,15 +426,15 @@ namespace asyik
     return message;
   }
 
-  void websocket::send_string(const std::string &str)
+  void websocket::send_string(string_view str)
   {
     if (is_server_connection)
-      internal::websocket::async_write(*ws_server, asio::buffer(str.c_str(), str.length()));
+      internal::websocket::async_write(*ws_server, asio::buffer(str.data(), str.length()));
     else
-      internal::websocket::async_write(*ws_client, asio::buffer(str.c_str(), str.length()));
+      internal::websocket::async_write(*ws_client, asio::buffer(str.data(), str.length()));
   }
 
-  void websocket::close(websocket_close_code code, const std::string &reason)
+  void websocket::close(websocket_close_code code, string_view reason)
   {
     const boost::beast::websocket::close_reason cr(code, reason);
     if (is_server_connection)

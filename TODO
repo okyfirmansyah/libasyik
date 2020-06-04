@@ -1,5 +1,4 @@
 GENERAL/Service:
--pindahin internal_api ke tiap2 function
 -rapihin exceptions
 -move to string_view
 

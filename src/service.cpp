@@ -4,7 +4,6 @@
 #include "boost/fiber/all.hpp"
 #include "libasyik/service.hpp"
 #include "catch2/catch.hpp"
-#include "libasyik/internal_api.hpp"
 #include "libasyik/http.hpp"
 
 namespace ip = boost::asio::ip;
