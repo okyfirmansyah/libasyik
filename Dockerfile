@@ -62,6 +62,26 @@ RUN cd ~ && \
     make clean && \
     ldconfig
 
+ARG DOCKER_TYPE
+
+RUN if [ "$DOCKER_TYPE" = "TEST" ]; then \
+    apt-get install -y git; \
+  fi
+
 RUN apt-get autoremove -y &&\
     apt-get clean -y &&\
     rm -rf /var/lib/apt/lists/*
+
+RUN mkdir /usr/local/libasyik
+COPY . /usr/local/libasyik
+
+RUN if [ "$DOCKER_TYPE" = "TEST" ]; then \
+    cd /usr/local/libasyik && \
+    git submodule update --init --recursive && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j 4 && \
+    cp tests/libasyik_test  /usr/bin ; \
+  fi
+  
