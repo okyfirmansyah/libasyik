@@ -24,7 +24,7 @@ TEST_CASE("Create http server and client, do some websocket communications", "[w
 {
   auto as = asyik::make_service();
 
-  auto server = asyik::make_http_server(as, "0.0.0.0", 4004);
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
   server->on_websocket("/<int>/name/<string>", [](auto ws, auto args) {
     while (1)
@@ -73,7 +73,7 @@ TEST_CASE("Create http server and client, do some http communications", "[http]"
 {
   auto as = asyik::make_service();
 
-  auto server = asyik::make_http_server(as, "0.0.0.0", 4004);
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
   server->on_websocket("/<int>/test/<string>", [](auto ws, auto args) {
     ws->send_string(args[1]);
