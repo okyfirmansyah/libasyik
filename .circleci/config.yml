@@ -9,8 +9,8 @@ workflows:
   # Name the workflow "welcome"
   welcome:
     # Run the welcome/run job in its own container
-    jobs:
-      - welcome/run
-      - docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
-      - docker run -it --rm test-docker libasyik_test       
+    run: |
+      welcome/run
+      docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
+      docker run -it --rm test-docker libasyik_test       
       
