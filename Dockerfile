@@ -18,6 +18,28 @@ RUN apt-get -y update && \
     apt-get clean -y &&\
     rm -rf /var/lib/apt/lists/*
 
+RUN apt-get -y update && \
+    apt-get install -y libpq-dev libsqlite3-dev unzip && \
+    cd ~/temp && \
+    git clone https://github.com/jtv/libpqxx.git && cd libpqxx && \
+    git checkout 7.1.1 && \
+    mkdir build && cd build && \
+    cmake .. -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql/libpq && \
+    make -j6 && make install && \
+    cd ~/temp && \
+    wget https://github.com/SOCI/soci/archive/release/4.0.zip && \
+    unzip 4.0.zip && \
+    cd soci-release-4.0 && \
+    mkdir build && cd build && \
+    cmake .. -DWITH_BOOST=ON -DWITH_POSTGRESQL=ON -DWITH_SQLITE3=ON -DCMAKE_CXX_STANDARD=14 -DSOCI_CXX11=ON && \
+    make -j6 && make install && \
+    cp /usr/local/cmake/SOCI.cmake /usr/local/cmake/SOCIConfig.cmake && \
+    ln -s /usr/local/lib64/libsoci_* /usr/local/lib && ldconfig && \
+    rm -rf ~/temp/* && \
+    apt-get autoremove -y &&\
+    apt-get clean -y &&\
+    rm -rf /var/lib/apt/lists/*
+
 ARG DOCKER_TYPE
 
 RUN mkdir /usr/local/libasyik
