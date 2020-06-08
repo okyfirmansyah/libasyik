@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 add_subdirectory(src)
 add_subdirectory(tests)
@@ -15,5 +15,5 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
 target_link_libraries(${PROJECT_NAME} libasyik Catch2::Catch2)
-#target_include_directories(${PROJECT_NAME} PRIVATE external/Catch2/include)
+
 
