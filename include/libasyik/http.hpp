@@ -22,6 +22,8 @@ namespace websocket = beast::websocket;
 
 namespace asyik
 {
+  void _TEST_invoke_http();
+
   class http_connection;
   using http_connection_ptr = std::shared_ptr<http_connection>;
   using http_connection_wptr = std::weak_ptr<http_connection>;
@@ -250,18 +252,9 @@ namespace asyik
   public:
     ~http_request(){};
     http_request &operator=(const http_request &) = delete;
-    //http_request() = delete;
     http_request(const http_request &) = delete;
     http_request(http_request &&) = default;
     http_request &operator=(http_request &&) = default;
-
-    // http_request(http_beast_request &request, http_beast_response &response)
-    // :beast_request(request),
-    //  headers(beast_request.base()),
-    //  body(beast_request.body()),
-    //  response({response, response.base(), response.body()})
-    // {
-    // };
 
     http_request()
         : beast_request(),
@@ -336,6 +329,7 @@ namespace asyik
     websocket(const websocket &) = delete;
     websocket(websocket &&) = default;
     websocket &operator=(websocket &&) = default;
+
 
     template <typename executor_type>
     websocket(struct private_ &&, const executor_type &io_service, const std::string &host_, const std::string &port_, const std::string &path_)
