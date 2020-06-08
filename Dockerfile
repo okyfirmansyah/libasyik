@@ -11,7 +11,7 @@ RUN apt-get -y update && \
     cd cmake-3.14.5 && \
     ./bootstrap && make -j4 && make install && \
     rm -rf ~/temp/* && \
-    cd ~/temp &&  wget https://dl.bintray.com/boostorg/release/1.70.0/source/boost_1_70_0.tar.gz && \
+    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.70.0/boost_1_70_0.tar.gz && \
     tar -zxvf boost_1_70_0.tar.gz && cd boost_1_70_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++17" --reconfigure --with-fiber install && \
     rm -rf ~/temp/* && \
     apt-get autoremove -y &&\
