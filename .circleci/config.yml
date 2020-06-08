@@ -4,10 +4,9 @@ jobs:
    machine: true
    steps:
      - checkout
-     # start proprietary DB using private Docker image
-     # with credentials stored in the UI
+     
+     # build the application image
      - run: docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
       
-
-     # build the application image
-     - run: docker run -it --rm test-docker libasyik_test       
+     # run test app
+     - run: docker run -it --rm test-docker timeout 60 libasyik_test       
