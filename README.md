@@ -3,7 +3,7 @@
 
 **Libasyik** is C++ microframework for highly scalable concurrent programming based on **boost::fiber** and **boost::asio**. 
 
-Basic features containing web, websockets, http clients, and database access functions.
+Basic features containing web server, websockets, http clients, and database access functions.
 
 ```c++
 #include "service.hpp"
