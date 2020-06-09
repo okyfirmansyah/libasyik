@@ -1,5 +1,5 @@
 # libasyik
-[![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>)
+[![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
 **Libasyik** is C++ microframework for highly scalable concurrent programming based on **boost::fiber** and **boost::asio**. 
 
