@@ -37,19 +37,16 @@ namespace asyik
         if (idle_threshold)
         {
           idle_threshold--;
-          usleep(10);
+          asyik::sleep_for(std::chrono::microseconds(50));
         }
         else
         {
-          boost::this_fiber::yield();
-          usleep(3000);
+          asyik::sleep_for(std::chrono::microseconds(2000));
           io_service.poll();
         }
       }
       else
         idle_threshold = 300;
-
-      boost::this_fiber::yield();
     }
   }
 
