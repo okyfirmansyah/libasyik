@@ -11,8 +11,8 @@ RUN apt-get -y update && \
     cd cmake-3.14.5 && \
     ./bootstrap && make -j4 && make install && \
     rm -rf ~/temp/* && \
-    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.70.0/boost_1_70_0.tar.gz && \
-    tar -zxvf boost_1_70_0.tar.gz && cd boost_1_70_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++17" --reconfigure --with-fiber install && \
+    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.73.0/boost_1_73_0.tar.gz && \
+    tar -zxvf boost_1_73_0.tar.gz && cd boost_1_73_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++17" --reconfigure --with-fiber install && \
     cd ~/temp && git clone https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
     apt-get install -y libperlio-gzip-perl libjson-perl && \
     rm -rf ~/temp/* && \
