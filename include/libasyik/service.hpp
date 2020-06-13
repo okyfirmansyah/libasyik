@@ -79,9 +79,8 @@ namespace asyik
       if (!workers_initiated)
         init_workers();
 
-      fibers::promise<typename std::result_of<F(Args...)>::type> promise;
-      auto future = promise.get_future();
-      auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>(std::move(promise));
+      auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
+      auto future = p->get_future();
       tasks->push([f = std::forward<F>(fun),
                    &args...,
                    p]() mutable {
@@ -114,6 +113,8 @@ namespace asyik
 
     boost::asio::io_context &get_io_service() { return io_service; };
     static void terminate();
+
+    static std::chrono::time_point<std::chrono::high_resolution_clock> start;//!!!
 
   private:
     bool stopped;

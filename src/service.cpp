@@ -5,6 +5,7 @@
 #include "libasyik/service.hpp"
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
+#include <chrono>
 
 namespace ip = boost::asio::ip;
 namespace websocket = beast::websocket;
@@ -15,6 +16,8 @@ namespace beast = boost::beast;
 namespace asyik
 {
   void _TEST_invoke_service(){};
+
+  std::chrono::time_point<std::chrono::high_resolution_clock> service::start;//!!!
 
   service::service(struct service::private_ &&) : stopped(false), io_service()
   {
@@ -37,16 +40,15 @@ namespace asyik
         if (idle_threshold)
         {
           idle_threshold--;
-          asyik::sleep_for(std::chrono::microseconds(50));
+          asyik::sleep_for(std::chrono::microseconds(10));
         }
         else
         {
-          asyik::sleep_for(std::chrono::microseconds(2000));
-          io_service.poll();
+          asyik::sleep_for(std::chrono::microseconds(4000));
         }
       }
       else
-        idle_threshold = 300;
+        idle_threshold = 10000;
     }
   }
 
