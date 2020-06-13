@@ -5,9 +5,9 @@
 #include "boost/utility/string_view.hpp"
 #include "version.hpp"
 
-#define LIBASYIK_VERSION_STRING "Libasyik v" BOOST_STRINGIZE(BOOST_BEAST_MAJOR) "."  \
-                                             BOOST_STRINGIZE(BOOST_BEAST_MINOR) "."  \
-                                             BOOST_STRINGIZE(BOOST_BEAST_PATCH)
+#define LIBASYIK_VERSION_STRING "Libasyik v" BOOST_STRINGIZE(LIBASYIK_VERSION_MAJOR) "."  \
+                                             BOOST_STRINGIZE(LIBASYIK_VERSION_MINOR) "."  \
+                                             BOOST_STRINGIZE(LIBASYIK_VERSION_PATCH)
 
 namespace asyik
 {
