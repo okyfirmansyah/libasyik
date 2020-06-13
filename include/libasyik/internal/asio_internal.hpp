@@ -170,6 +170,45 @@ namespace asyik
             };
         } // namespace http
 
+        namespace ssl
+        {
+            template <typename Conn, typename... Args>
+            auto async_handshake(Conn &con, Args &&... args)
+            {
+                boost::fibers::promise<void> promise;
+                auto future = promise.get_future();
+
+                con.async_handshake(std::forward<Args>(args)...,
+                                    [prom = std::move(promise)](const beast::error_code &ec) mutable {
+                                    if (!ec)
+                                        prom.set_value();
+                                    else
+                                        prom.set_exception(std::make_exception_ptr(
+                                            std::runtime_error("read_error")));
+                               });
+
+                return std::move(future);
+            }
+
+            template <typename Conn, typename... Args>
+            auto async_shutdown(Conn &con, Args &&... args)
+            {
+                boost::fibers::promise<void> promise;
+                auto future = promise.get_future();
+
+                con.async_shutdown(std::forward<Args>(args)...,
+                                   [prom = std::move(promise)](const beast::error_code &ec) mutable {
+                                   if (!ec)
+                                       prom.set_value();
+                                   else
+                                       prom.set_exception(std::make_exception_ptr(
+                                           std::runtime_error("read_error")));
+                                    });
+
+                return std::move(future);
+            }
+        }
+
         namespace websocket
         {
             template <typename Conn, typename... Args>

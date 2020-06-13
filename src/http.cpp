@@ -556,12 +556,23 @@ namespace asyik
       REQUIRE(!req->response.body.compare("-GET-123-sip"));
       REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
 
-      // negative test
       req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/not-found");
       REQUIRE(req->response.result()==404);
 
+      // negative tests (TODO)
       //req = asyik::http_easy_request(as, "GET", "3878sad9das7d97d8safdsfd.com/not-found");
       //REQUIRE(req->response.result()==404);
+
+      // SSL Test
+      req = asyik::http_easy_request(as, "GET", "https://tls-v1-2.badssl.com:1012/");
+      REQUIRE(req->response.result()==200);
+      REQUIRE(req->response.body.length());
+
+      req = asyik::http_easy_request(as, "GET", "https://tls-v1-0.badssl.com:1012/");
+      REQUIRE(req->response.result()==200);
+      REQUIRE(req->response.body.length());
+
+      // SSL Negative tests (TODO)
 
       as->stop();
     });

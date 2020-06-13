@@ -5,8 +5,11 @@
 #include "boost/fiber/all.hpp"
 #include "aixlog.hpp"
 #include "boost/asio.hpp"
+#include <boost/asio/ssl/error.hpp>
+#include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include "service.hpp"
 #include "boost/algorithm/string/predicate.hpp"
@@ -16,6 +19,7 @@ namespace fibers = boost::fibers;
 using fiber = boost::fibers::fiber;
 using tcp = boost::asio::ip::tcp;
 namespace asio = boost::asio;
+namespace ssl = asio::ssl;
 namespace beast = boost::beast;
 namespace ip = boost::asio::ip;
 namespace websocket = beast::websocket;
@@ -406,19 +410,44 @@ namespace asyik
       tcp::resolver resolver(as->get_io_service().get_executor());
       tcp::resolver::results_type results = internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port));
 
-      beast::tcp_stream stream(as->get_io_service().get_executor());
+      if(scheme.is_ssl)
+      {
+        // The SSL context is required, and holds certificates
+        ssl::context ctx(ssl::context::tlsv12_client);
+
+        // This holds the root certificate used for verification
+        //load_root_certificates(ctx);
+
+        ctx.set_default_verify_paths();
+        ctx.set_verify_mode(ssl::verify_peer);
+        
+
+        beast::ssl_stream<beast::tcp_stream> stream(as->get_io_service().get_executor(), ctx);
+
+        internal::socket::async_connect(beast::get_lowest_layer(stream), results);
+        internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
+        internal::http::async_write(stream, req->beast_request);
+        internal::http::async_read(stream, req->buffer, req->response.beast_response);
+
+        internal::ssl::async_shutdown(stream).get();
+
+        return req;
+      }else
+      {
+        beast::tcp_stream stream(as->get_io_service().get_executor());
       
-      internal::socket::async_connect(stream, results);
-      internal::http::async_write(stream, req->beast_request);
-      internal::http::async_read(stream, req->buffer, req->response.beast_response);
+        internal::socket::async_connect(stream, results);
+        internal::http::async_write(stream, req->beast_request);
+        internal::http::async_read(stream, req->buffer, req->response.beast_response);
 
-      beast::error_code ec;
-      stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 
-      if(ec && ec != beast::errc::not_connected)
-        throw beast::system_error{ec};
+        if(ec && ec != beast::errc::not_connected)
+          throw beast::system_error{ec};
 
-      return req;
+        return req;
+      }
     }else 
       return nullptr;
   };

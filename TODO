@@ -1,14 +1,15 @@
 GENERAL/Service:
 -pindahin internal_api ke tiap2 function
--rapihin exceptions
+-rapihin exceptions(boost exception)
 -move to string_view
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
 -service::spawn, service::execute, and all similiar functions, should CHECK for thread_id(exception or auto-sync with correct thread)
 
 HTTP:
--support SSL
--http large request and large response
+-support SSL server
+-Support SSL client custom context(for e.g custom certificate, paths, callbacks)
 -http test network negative case(host not found, dns not found, no connection, timeouts)
+-http large request and large response
 -make http full client(separate connection and request)
 -set global timeout
   WEBSOCKET:
@@ -18,3 +19,10 @@ HTTP:
 
 SOCI:
 -rapihin SOCI's CMakeList
+-test postgresql
+
+Important Modules:
+-Socket TCP/UDP
+-Redis/Memcache
+-GRPC
+-RabbitMQ
