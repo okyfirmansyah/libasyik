@@ -100,7 +100,7 @@ namespace asyik
         sql_session(struct private_){};
 
         template <typename... Args>
-        void query(const std::string s, Args &&... args)
+        void query(string_view s, Args &&... args)
         {
             service->async([&args..., s, ses = soci_session.get()]() {
                        ((*ses << s), ..., std::forward<Args>(args));

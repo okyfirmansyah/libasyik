@@ -61,8 +61,8 @@ namespace asyik
 
   using websocket_close_code = boost::beast::websocket::close_code;
 
-  http_server_ptr make_http_server(service_ptr as, const std::string &addr, uint16_t port = 80);
-  http_connection_ptr make_http_connection(service_ptr as, const std::string &addr, const std::string &port);
+  http_server_ptr make_http_server(service_ptr as, string_view addr, uint16_t port = 80);
+  http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
   websocket_ptr make_websocket_connection(service_ptr as,
                                           string_view url,
                                           int timeout = 10);
@@ -90,7 +90,7 @@ namespace asyik
 
   namespace internal
   {
-    std::string route_spec_to_regex(const std::string &route_spc);
+    std::string route_spec_to_regex(string_view route_spc);
   }
 
   class http_server : public std::enable_shared_from_this<http_server>
@@ -108,17 +108,17 @@ namespace asyik
     http_server(http_server &&) = default;
     http_server &operator=(http_server &&) = default;
 
-    http_server(struct private_ &&, service_ptr as, const std::string &addr, uint16_t port);
+    http_server(struct private_ &&, service_ptr as, string_view addr, uint16_t port);
 
     template <typename T>
-    void on_http_request(const std::string &route_spec, T &&cb)
+    void on_http_request(string_view route_spec, T &&cb)
     {
       std::regex re(internal::route_spec_to_regex(route_spec));
       on_http_request_regex(re, "", std::forward<T>(cb));
     }
 
     template <typename T>
-    void on_http_request(const std::string &route_spec, const std::string &method, T &&cb)
+    void on_http_request(string_view route_spec, string_view method, T &&cb)
     {
       std::regex re(internal::route_spec_to_regex(route_spec));
       on_http_request_regex(re, method, std::forward<T>(cb));
@@ -127,11 +127,11 @@ namespace asyik
     template <typename R, typename M, typename T>
     void on_http_request_regex(R &&r, M &&m, T &&cb)
     {
-      http_routes.push_back({std::forward<M>(m), std::forward<R>(r), std::forward<T>(cb)});
+      http_routes.push_back({std::string{std::forward<M>(m)}, std::forward<R>(r), std::forward<T>(cb)});
     }
 
     template <typename T>
-    void on_websocket(const std::string &route_spec, T &&cb)
+    void on_websocket(string_view route_spec, T &&cb)
     {
       std::regex re(internal::route_spec_to_regex(route_spec));
       on_websocket_regex(re, std::forward<T>(cb));
@@ -196,7 +196,7 @@ namespace asyik
     std::vector<websocket_route_tuple> ws_routes;
 
     friend class http_connection;
-    friend http_server_ptr make_http_server(service_ptr, const std::string &, uint16_t);
+    friend http_server_ptr make_http_server(service_ptr, string_view , uint16_t);
   };
 
   class http_connection : public std::enable_shared_from_this<http_connection>
@@ -241,7 +241,7 @@ namespace asyik
     bool is_server_connection;
 
     friend class http_server;
-    friend http_connection_ptr make_http_connection(service_ptr as, const std::string &addr, const std::string &port);
+    friend http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
   };
 
   class http_request : public std::enable_shared_from_this<http_request>
@@ -329,7 +329,7 @@ namespace asyik
     websocket &operator=(websocket &&) = default;
 
   protected:
-    websocket(const std::string &host_, const std::string &port_, const std::string &path_)
+    websocket(string_view host_, string_view port_, string_view path_)
         : host(host_),
           port(port_),
           path(path_),
@@ -377,7 +377,7 @@ namespace asyik
 
 
     template <typename executor_type>
-    websocket_impl(struct private_ &&, const executor_type &io_service, const std::string &host_, const std::string &port_, const std::string &path_)
+    websocket_impl(struct private_ &&, const executor_type &io_service, string_view host_, string_view port_, string_view path_)
         : websocket(host_, port_, path_){};
 
     template <typename executor_type, typename ws_type, typename req_type>

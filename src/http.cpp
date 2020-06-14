@@ -19,9 +19,9 @@ namespace asyik
 {
   void _TEST_invoke_http(){};
 
-  std::string internal::route_spec_to_regex(const std::string &route_spc)
+  std::string internal::route_spec_to_regex(string_view route_spc)
   {
-    std::string regex_spec = route_spc;
+    std::string regex_spec{route_spc};
 
     // step 1: trim trailing .
     if (regex_spec[regex_spec.length() - 1] == '/')
@@ -178,16 +178,16 @@ namespace asyik
     REQUIRE(!result);
   }
 
-  http_server::http_server(struct private_ &&, service_ptr as, const std::string &addr, uint16_t port)
+  http_server::http_server(struct private_ &&, service_ptr as, string_view addr, uint16_t port)
       : service(as)
   {
     acceptor = std::make_shared<ip::tcp::acceptor>(as->get_io_service(),
-                                                   ip::tcp::endpoint(ip::address::from_string(addr), port), true);
+                                                   ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port), true);
     if (!acceptor)
       throw std::runtime_error("could not allocate TCP acceptor");
   }
 
-  http_server_ptr make_http_server(service_ptr as, const std::string &addr, uint16_t port)
+  http_server_ptr make_http_server(service_ptr as, string_view addr, uint16_t port)
   {
     auto p = std::make_shared<http_server>(http_server::private_{}, as, addr, port);
 
@@ -219,7 +219,7 @@ namespace asyik
         });
   }
 
-  http_connection_ptr make_http_connection(service_ptr as, const std::string &addr, const std::string &port)
+  http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port)
   {
     // tcp::resolver resolver(as->get_io_service().get_executor());
 
