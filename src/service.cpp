@@ -17,7 +17,7 @@ namespace asyik
 {
   void _TEST_invoke_service(){};
 
-  std::chrono::time_point<std::chrono::high_resolution_clock> service::start;//!!!
+  std::chrono::time_point<std::chrono::high_resolution_clock> service::start; //!!!
 
   service::service(struct service::private_ &&) : stopped(false), io_service()
   {
@@ -50,7 +50,7 @@ namespace asyik
       else
         idle_threshold = 10000;
     }
-    for(int i=0;i<10000;i++)
+    for (int i = 0; i < 10000; i++)
     {
       io_service.poll();
       asyik::sleep_for(std::chrono::microseconds(10));

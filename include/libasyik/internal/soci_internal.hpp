@@ -8,7 +8,6 @@
 namespace asio = boost::asio;
 namespace fibers = boost::fibers;
 
-
 namespace asyik
 {
     namespace internal

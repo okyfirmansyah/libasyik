@@ -18,7 +18,7 @@ namespace beast = boost::beast;
 namespace asyik
 {
   void _TEST_invoke_http(){};
-  
+
   std::string internal::route_spec_to_regex(const std::string &route_spc)
   {
     std::string regex_spec = route_spc;
@@ -69,32 +69,35 @@ namespace asyik
     if (std::regex_search(str, m, re))
     {
       // check if ssl or not ssl
-      if(m[1].str().compare(""))
+      if (m[1].str().compare(""))
       {
-        scheme.is_ssl=
-          std::regex_match(m[1].str(), 
-                           re2);
-          
-      } else
+        scheme.is_ssl =
+            std::regex_match(m[1].str(),
+                             re2);
+      }
+      else
         scheme.is_ssl = false;
 
       // is there any port specification or not
-      if(m[3].str().length())
+      if (m[3].str().length())
       {
-        scheme.host=m[3].str();
-        scheme.port=std::atoi(&m[4].str().c_str()[1]);
-      } else
+        scheme.host = m[3].str();
+        scheme.port = std::atoi(&m[4].str().c_str()[1]);
+      }
+      else
       {
-        scheme.host=m[5].str();
-        scheme.port=scheme.is_ssl?443:80;
+        scheme.host = m[5].str();
+        scheme.port = scheme.is_ssl ? 443 : 80;
       }
 
-      scheme.target=m[7].str();
-      if(!scheme.target.length())
-        scheme.target="/";
-      
+      scheme.target = m[7].str();
+      if (!scheme.target.length())
+        scheme.target = "/";
+
       return true;
-    }else return false;
+    }
+    else
+      return false;
   }
 
   TEST_CASE("check http_analyze_url against URL cases")
@@ -106,63 +109,63 @@ namespace asyik
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("simple.com"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==80);
+    REQUIRE(scheme.port == 80);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("Http://protspecify.co.id", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("protspecify.co.id"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==80);
+    REQUIRE(scheme.port == 80);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("https://prothttps.x.y.z/", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("prothttps.x.y.z"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.port == 443);
     REQUIRE(scheme.is_ssl);
 
     result = http_analyze_url("https://protandport.x:69", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("protandport.x"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==69);
+    REQUIRE(scheme.port == 69);
     REQUIRE(scheme.is_ssl);
 
     result = http_analyze_url("simple.x.y.z:443/check", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("simple.x.y.z"));
     REQUIRE(!scheme.target.compare("/check"));
-    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.port == 443);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("http://simple.co.id:443/check", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("simple.co.id"));
     REQUIRE(!scheme.target.compare("/check"));
-    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.port == 443);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("http://10.10.10.1:443/check", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("10.10.10.1"));
     REQUIRE(!scheme.target.compare("/check"));
-    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.port == 443);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("10.10.10.1:443/", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("10.10.10.1"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==443);
+    REQUIRE(scheme.port == 443);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("10.10.10.2", scheme);
     REQUIRE(result);
     REQUIRE(!scheme.host.compare("10.10.10.2"));
     REQUIRE(!scheme.target.compare("/"));
-    REQUIRE(scheme.port==80);
+    REQUIRE(scheme.port == 80);
     REQUIRE(!scheme.is_ssl);
 
     result = http_analyze_url("invalid://simple.com:443/check", scheme);
@@ -287,11 +290,10 @@ namespace asyik
 
                   auto service = server->service.lock();
 
-                  auto new_ws = std::make_shared<websocket_impl<beast::websocket::stream<ip::tcp::socket>>>
-                    (websocket_impl<beast::websocket::stream<ip::tcp::socket>>::private_{},
-                    service->get_io_service().get_executor(),
-                    std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
-                    asyik_req);
+                  auto new_ws = std::make_shared<websocket_impl<beast::websocket::stream<ip::tcp::socket>>>(websocket_impl<beast::websocket::stream<ip::tcp::socket>>::private_{},
+                                                                                                            service->get_io_service().get_executor(),
+                                                                                                            std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
+                                                                                                            asyik_req);
 
                   asyik::internal::websocket::async_accept(*new_ws->ws, req).get();
                   p->is_websocket = true;
@@ -379,15 +381,15 @@ namespace asyik
   {
     bool result;
     http_url_scheme scheme;
-    
-    if(http_analyze_url(url, scheme))
+
+    if (http_analyze_url(url, scheme))
     {
       tcp::resolver resolver(asio::make_strand(as->get_io_service()));
 
-      tcp::resolver::results_type results = 
-        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
+      tcp::resolver::results_type results =
+          internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
 
-      if(scheme.is_ssl)
+      if (scheme.is_ssl)
       {
         // The SSL context is required, and holds certificates
         ssl::context ctx(ssl::context::tlsv12_client);
@@ -398,19 +400,20 @@ namespace asyik
         ctx.set_default_verify_paths();
         ctx.set_verify_mode(ssl::verify_peer);
 
-        auto new_ws = 
-          std::make_shared<websocket_impl<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>>
-            (websocket_impl<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>::private_{}, 
-             as->get_io_service().get_executor(), scheme.host, std::to_string(scheme.port), scheme.target);
+        using stream_type = beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
+        auto new_ws =
+            std::make_shared<websocket_impl<stream_type>>(websocket_impl<stream_type>::private_{},
+                                                          as->get_io_service().get_executor(),
+                                                          scheme.host,
+                                                          std::to_string(scheme.port), scheme.target);
 
-        new_ws->ws = std::make_shared<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>
-          (as->get_io_service().get_executor(), ctx);
+        new_ws->ws = std::make_shared<stream_type>(as->get_io_service().get_executor(), ctx);
 
         // Set the timeout for the operation
         beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
         tcp::resolver::results_type::endpoint_type ep =
-          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
+            internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         internal::ssl::async_handshake(new_ws->ws->next_layer(), ssl::stream_base::client).get();
 
@@ -420,39 +423,41 @@ namespace asyik
 
         // Set suggested timeout settings for the websocket
         new_ws->ws->set_option(
-          beast::websocket::stream_base::timeout::suggested(
-              beast::role_type::client));
+            beast::websocket::stream_base::timeout::suggested(
+                beast::role_type::client));
 
         // Set a decorator to change the User-Agent of the handshake
         new_ws->ws->set_option(beast::websocket::stream_base::decorator(
-          [](beast::websocket::request_type &req) {
-            req.set(http::field::user_agent,
-                  std::string(BOOST_BEAST_VERSION_STRING) +
-                      " websocket-client-async");
-          }));
+            [](beast::websocket::request_type &req) {
+              req.set(http::field::user_agent,
+                      std::string(BOOST_BEAST_VERSION_STRING) +
+                          " websocket-client-async");
+            }));
 
         //Perform the websocket handshake
-        if(scheme.port==80 || scheme.port==443)
+        if (scheme.port == 80 || scheme.port == 443)
           internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target).get();
         else
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target).get();
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host + ":" + std::to_string(scheme.port), scheme.target).get();
 
         return new_ws;
-      }else
+      }
+      else
       {
-        auto new_ws = 
-          std::make_shared<websocket_impl<beast::websocket::stream<beast::tcp_stream>>>
-            (websocket_impl<beast::websocket::stream<beast::tcp_stream>>::private_{}, 
-             as->get_io_service().get_executor(), scheme.host, std::to_string(scheme.port), scheme.target);
+        using stream_type = beast::websocket::stream<beast::tcp_stream>;
+        auto new_ws =
+            std::make_shared<websocket_impl<stream_type>>(websocket_impl<beast::websocket::stream<beast::tcp_stream>>::private_{},
+                                                          as->get_io_service().get_executor(),
+                                                          scheme.host, std::to_string(scheme.port), scheme.target);
 
-        new_ws->ws = std::make_shared<beast::websocket::stream<beast::tcp_stream>>(as->get_io_service().get_executor());
+        new_ws->ws = std::make_shared<stream_type>(as->get_io_service().get_executor());
 
         // Set the timeout for the operation
         beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
         // Make the connection on the IP address we get from a lookup
         tcp::resolver::results_type::endpoint_type ep =
-          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
+            internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         // Turn off the timeout on the tcp_stream, because
         // the websocket stream has its own timeout system.
@@ -460,29 +465,33 @@ namespace asyik
 
         // Set suggested timeout settings for the websocket
         new_ws->ws->set_option(
-          beast::websocket::stream_base::timeout::suggested(
-              beast::role_type::client));
+            beast::websocket::stream_base::timeout::suggested(
+                beast::role_type::client));
 
         // Set a decorator to change the User-Agent of the handshake
         new_ws->ws->set_option(beast::websocket::stream_base::decorator(
-          [](beast::websocket::request_type &req) {
-            req.set(http::field::user_agent,
-                  std::string(BOOST_BEAST_VERSION_STRING) +
-                      " websocket-client-async");
-          }));
+            [](beast::websocket::request_type &req) {
+              req.set(http::field::user_agent,
+                      std::string(BOOST_BEAST_VERSION_STRING) +
+                          " websocket-client-async");
+            }));
 
         //Perform the websocket handshake
-        if(scheme.port==80 || scheme.port==443)
+        if (scheme.port == 80 || scheme.port == 443)
           internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target).get();
         else
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target).get();
+          internal::websocket::async_handshake(*new_ws->ws,
+                                               scheme.host + ":" + std::to_string(scheme.port), scheme.target)
+              .get();
 
         return new_ws;
       }
-    }else return nullptr;
+    }
+    else
+      return nullptr;
   }
-  
-  http_request_ptr http_easy_request(service_ptr as, 
+
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url)
   {
     return http_easy_request(as, method, url, "");
@@ -590,29 +599,29 @@ namespace asyik
     });
 
     asyik::sleep_for(std::chrono::milliseconds(100));
-    as->execute([as](){
+    as->execute([as]() {
       auto req = asyik::http_easy_request(as, "POST", "http://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
 
-      REQUIRE(req->response.result()==200);
+      REQUIRE(req->response.result() == 200);
       std::string x_test_reply{req->response.headers["x-test-reply"]};
-      std::string body=req->response.body;
+      std::string body = req->response.body;
       REQUIRE(!body.compare("hehe-30-listed-ok"));
       REQUIRE(!x_test_reply.compare("amiiin"));
 
       req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/999/");
-    
-      REQUIRE(req->response.result()==200);
+
+      REQUIRE(req->response.result() == 200);
       REQUIRE(!req->response.body.compare("-GET-999-"));
       REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
 
       req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/123/", "", {{"x-test", "sip"}});
-    
-      REQUIRE(req->response.result()==200);
+
+      REQUIRE(req->response.result() == 200);
       REQUIRE(!req->response.body.compare("-GET-123-sip"));
       REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
 
       req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/not-found");
-      REQUIRE(req->response.result()==404);
+      REQUIRE(req->response.result() == 404);
 
       // negative tests (TODO)
       //req = asyik::http_easy_request(as, "GET", "3878sad9das7d97d8safdsfd.com/not-found");
@@ -620,11 +629,11 @@ namespace asyik
 
       // SSL Test
       req = asyik::http_easy_request(as, "GET", "https://tls-v1-2.badssl.com:1012/");
-      REQUIRE(req->response.result()==200);
+      REQUIRE(req->response.result() == 200);
       REQUIRE(req->response.body.length());
 
       req = asyik::http_easy_request(as, "GET", "https://tls-v1-0.badssl.com:1012/");
-      REQUIRE(req->response.result()==200);
+      REQUIRE(req->response.result() == 200);
       REQUIRE(req->response.body.length());
 
       // SSL Negative tests (TODO)
@@ -635,9 +644,8 @@ namespace asyik
     // auto client = asyik::make_http_connection(as, "127.0.0.1", "80");
     // auto req=std::make_shared<http_request>();
     // client->send_request(req);
-  
+
     as->run();
   }
-
 
 } // namespace asyik

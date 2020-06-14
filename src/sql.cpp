@@ -160,22 +160,22 @@ namespace asyik
         ses->query("delete from persons where id=:id", use(id));
         ses->query("delete from persons where id=:id", use(id2));
 
-        {//commited transaction
+        { //commited transaction
           sql_transaction tr(ses);
           ses->query("insert into persons(id, name) values(:id, :name)", use(id), use(name));
           tr.commit();
           // below transaction will be treated as no transaction exists
-          ses->query("insert into persons(id, name) values(:id, :name)", use(id2+1), use(name2));
+          ses->query("insert into persons(id, name) values(:id, :name)", use(id2 + 1), use(name2));
         }
 
-        {//aborted transaction
+        { //aborted transaction
           sql_transaction tr(ses);
           ses->query("insert into persons(id, name) values(:id, :name)", use(id), use(name));
           ses->query("insert into persons(id, name) values(:id, :name)", use(id2), use(name2));
         }
 
         name2 = std::to_string(rand() % 1000000);
-        {//rollback and redo transactions
+        { //rollback and redo transactions
           sql_transaction tr(ses);
           ses->query("insert into persons(id, name) values(:id, :name)", use(id), use(name));
           ses->query("insert into persons(id, name) values(:id, :name)", use(id2), use(name2));
@@ -186,7 +186,7 @@ namespace asyik
         }
 
         int count;
-        ses->query("select count(*) from persons where id=:id1 or id=:id2 or id=:id3", use(id), use(id2), use(id2+1), into(count));
+        ses->query("select count(*) from persons where id=:id1 or id=:id2 or id=:id3", use(id), use(id2), use(id2 + 1), into(count));
         REQUIRE(count == 3);
 
         int new_id;
@@ -200,7 +200,7 @@ namespace asyik
 
         REQUIRE(new_id == id2);
         REQUIRE(!new_name.compare(name2));
-        
+
         count_down++;
       });
 

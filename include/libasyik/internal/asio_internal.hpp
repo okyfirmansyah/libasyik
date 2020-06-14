@@ -180,12 +180,12 @@ namespace asyik
 
                 con.async_handshake(std::forward<Args>(args)...,
                                     [prom = std::move(promise)](const beast::error_code &ec) mutable {
-                                    if (!ec)
-                                        prom.set_value();
-                                    else
-                                        prom.set_exception(std::make_exception_ptr(
-                                            std::runtime_error("read_error")));
-                               });
+                                        if (!ec)
+                                            prom.set_value();
+                                        else
+                                            prom.set_exception(std::make_exception_ptr(
+                                                std::runtime_error("read_error")));
+                                    });
 
                 return std::move(future);
             }
@@ -198,16 +198,16 @@ namespace asyik
 
                 con.async_shutdown(std::forward<Args>(args)...,
                                    [prom = std::move(promise)](const beast::error_code &ec) mutable {
-                                   if (!ec)
-                                       prom.set_value();
-                                   else
-                                       prom.set_exception(std::make_exception_ptr(
-                                           std::runtime_error("read_error")));
-                                    });
+                                       if (!ec)
+                                           prom.set_value();
+                                       else
+                                           prom.set_exception(std::make_exception_ptr(
+                                               std::runtime_error("read_error")));
+                                   });
 
                 return std::move(future);
             }
-        }
+        } // namespace ssl
 
         namespace websocket
         {
