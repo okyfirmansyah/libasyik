@@ -391,14 +391,14 @@ namespace asyik
       std::string message;
       auto buffer = asio::dynamic_buffer(message);
 
-      internal::websocket::async_read(*ws, buffer);
+      internal::websocket::async_read(*ws, buffer).get();
       
       return message;
     }
 
     virtual void send_string(string_view s)
     {
-      internal::websocket::async_write(*ws, asio::buffer(s.data(), s.length()));
+      internal::websocket::async_write(*ws, asio::buffer(s.data(), s.length())).get();
     }
 
     virtual void close(websocket_close_code code, string_view reason)
@@ -450,7 +450,8 @@ namespace asyik
       req->beast_request.prepare_payload();
       
       tcp::resolver resolver(as->get_io_service().get_executor());
-      tcp::resolver::results_type results = internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port));
+      tcp::resolver::results_type results = 
+        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
 
       if(scheme.is_ssl)
       {
@@ -466,10 +467,10 @@ namespace asyik
 
         beast::ssl_stream<beast::tcp_stream> stream(as->get_io_service().get_executor(), ctx);
 
-        internal::socket::async_connect(beast::get_lowest_layer(stream), results);
+        internal::socket::async_connect(beast::get_lowest_layer(stream), results).get();
         internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
         internal::http::async_write(stream, req->beast_request);
-        internal::http::async_read(stream, req->buffer, req->response.beast_response);
+        internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
 
         internal::ssl::async_shutdown(stream).get();
 
@@ -478,9 +479,9 @@ namespace asyik
       {
         beast::tcp_stream stream(as->get_io_service().get_executor());
       
-        internal::socket::async_connect(stream, results);
+        internal::socket::async_connect(stream, results).get();
         internal::http::async_write(stream, req->beast_request);
-        internal::http::async_read(stream, req->buffer, req->response.beast_response);
+        internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
 
         beast::error_code ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);

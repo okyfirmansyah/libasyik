@@ -23,7 +23,7 @@ namespace asyik
         namespace socket
         {
             template <typename... Args>
-            size_t async_read(Args &&... args)
+            auto async_read(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -37,11 +37,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
 
             template <typename... Args>
-            size_t async_write(Args &&... args)
+            auto async_write(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -55,11 +55,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("write_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
 
             template <typename... Args>
-            size_t async_read_until(Args &&... args)
+            auto async_read_until(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -75,11 +75,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
 
             template <typename T>
-            void async_timer_wait(T &&p)
+            auto async_timer_wait(T &&p)
             {
                 boost::fibers::promise<void> promise;
                 auto future = promise.get_future();
@@ -89,11 +89,11 @@ namespace asyik
                         prom.set_value();
                     });
 
-                return future.get();
+                return std::move(future);
             };
 
             template <typename Resolver, typename... Args>
-            tcp::resolver::results_type async_resolve(Resolver &res, Args &&... args)
+            auto async_resolve(Resolver &res, Args &&... args)
             {
                 boost::fibers::promise<tcp::resolver::results_type> promise;
                 auto future = promise.get_future();
@@ -108,11 +108,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
 
             template <typename Conn, typename... Args>
-            tcp::resolver::results_type::endpoint_type async_connect(Conn &con, Args &&... args)
+            auto async_connect(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<tcp::resolver::results_type::endpoint_type> promise;
                 auto future = promise.get_future();
@@ -127,14 +127,14 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
-                return future.get();
+                return std::move(future);
             }
         } // namespace socket
 
         namespace http
         {
             template <typename... Args>
-            size_t async_read(Args &&... args)
+            auto async_read(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -148,11 +148,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("write_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
 
             template <typename... Args>
-            size_t async_write(Args &&... args)
+            auto async_write(Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -166,7 +166,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("write_error")));
                     });
-                return future.get();
+                return std::move(future);
             };
         } // namespace http
 
@@ -212,7 +212,7 @@ namespace asyik
         namespace websocket
         {
             template <typename Conn, typename... Args>
-            size_t async_read(Conn &con, Args &&... args)
+            auto async_read(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -226,11 +226,11 @@ namespace asyik
                                        prom.set_exception(std::make_exception_ptr(
                                            std::runtime_error("read_error")));
                                });
-                return future.get();
+                return std::move(future);
             }
 
             template <typename Conn, typename... Args>
-            size_t async_read_some(Conn &con, Args &&... args)
+            auto async_read_some(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -245,11 +245,11 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
-                return future.get();
+                return std::move(future);
             }
 
             template <typename Conn, typename... Args>
-            size_t async_write(Conn &con, Args &&... args)
+            auto async_write(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<size_t> promise;
                 auto future = promise.get_future();
@@ -263,11 +263,11 @@ namespace asyik
                                         prom.set_exception(std::make_exception_ptr(
                                             std::runtime_error("read_error")));
                                 });
-                return future.get();
+                return std::move(future);
             }
 
             template <typename Conn, typename... Args>
-            void async_accept(Conn &con, Args &&... args)
+            auto async_accept(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<void> promise;
                 auto future = promise.get_future();
@@ -282,11 +282,11 @@ namespace asyik
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
 
-                return future.get();
+                return std::move(future);
             }
 
             template <typename Conn, typename... Args>
-            void async_handshake(Conn &con, Args &&... args)
+            auto async_handshake(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<void> promise;
                 auto future = promise.get_future();
@@ -301,7 +301,7 @@ namespace asyik
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
 
-                return future.get();
+                return std::move(future);
             }
 
             template <typename Conn, typename... Args>
@@ -320,7 +320,7 @@ namespace asyik
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
 
-                return future;
+                return std::move(future);
             }
         } // namespace websocket
     }     //namespace internal

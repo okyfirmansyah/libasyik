@@ -220,7 +220,7 @@ namespace asyik
   {
     // tcp::resolver resolver(as->get_io_service().get_executor());
 
-    // tcp::resolver::results_type results=internal::socket::async_resolve(resolver, addr, port);
+    // tcp::resolver::results_type results=internal::socket::async_resolve(resolver, addr, port).get();
 
     // auto new_connection = std::make_shared<http_connection>
     //                      (http_connection::private_{}, as->get_io_service().get_executor());
@@ -261,7 +261,7 @@ namespace asyik
             auto &req = asyik_req->beast_request;
             while (1)
             {
-              asyik::internal::http::async_read(p->get_socket(), asyik_req->buffer, req);
+              asyik::internal::http::async_read(p->get_socket(), asyik_req->buffer, req).get();
 
               // See if its a WebSocket upgrade request
               if (beast::websocket::is_upgrade(req))
@@ -293,7 +293,7 @@ namespace asyik
                     std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
                     asyik_req);
 
-                  asyik::internal::websocket::async_accept(*new_ws->ws, req);
+                  asyik::internal::websocket::async_accept(*new_ws->ws, req).get();
                   p->is_websocket = true;
 
                   try
@@ -357,7 +357,7 @@ namespace asyik
 
                 asyik_req->response.beast_response.prepare_payload();
                 http::serializer<false, http::string_body> sr{res};
-                asyik::internal::http::async_write(p->get_socket(), res);
+                asyik::internal::http::async_write(p->get_socket(), res).get();
 
                 if (!req.need_eof())
                   break;
@@ -385,7 +385,7 @@ namespace asyik
       tcp::resolver resolver(asio::make_strand(as->get_io_service()));
 
       tcp::resolver::results_type results = 
-        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port));
+        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
 
       if(scheme.is_ssl)
       {
@@ -410,7 +410,7 @@ namespace asyik
         beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
         tcp::resolver::results_type::endpoint_type ep =
-          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results);
+          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         internal::ssl::async_handshake(new_ws->ws->next_layer(), ssl::stream_base::client).get();
 
@@ -433,9 +433,9 @@ namespace asyik
 
         //Perform the websocket handshake
         if(scheme.port==80 || scheme.port==443)
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target);
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target).get();
         else
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target);
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target).get();
 
         return new_ws;
       }else
@@ -452,7 +452,7 @@ namespace asyik
 
         // Make the connection on the IP address we get from a lookup
         tcp::resolver::results_type::endpoint_type ep =
-          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results);
+          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         // Turn off the timeout on the tcp_stream, because
         // the websocket stream has its own timeout system.
@@ -473,9 +473,9 @@ namespace asyik
 
         //Perform the websocket handshake
         if(scheme.port==80 || scheme.port==443)
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target);
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target).get();
         else
-          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target);
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target).get();
 
         return new_ws;
       }
