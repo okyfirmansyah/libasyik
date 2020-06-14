@@ -108,6 +108,7 @@ namespace asyik
     {
       if (workers_initiated)
       {
+        tasks->close();
         tasks = nullptr; // will close channel
         std::for_each(workers.begin(), workers.end(), [](auto &t) {
           t.join();
