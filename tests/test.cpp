@@ -10,6 +10,7 @@ using namespace asyik;
 // we dont do this:
 TEST_CASE("Invoke all test units", "[asyik]")
 {
+  _TEST_invoke_service();
   _TEST_invoke_http();
   _TEST_invoke_sql();
 }
