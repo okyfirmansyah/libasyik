@@ -50,6 +50,11 @@ namespace asyik
       else
         idle_threshold = 10000;
     }
+    for(int i=0;i<10000;i++)
+    {
+      io_service.poll();
+      asyik::sleep_for(std::chrono::microseconds(10));
+    }
   }
 
   void service::init_workers()

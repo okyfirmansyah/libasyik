@@ -39,6 +39,12 @@ namespace asyik
     };
   }; // namespace service_internal
 
+  template <typename T>
+  void sleep_for(T &&t)
+  {
+    boost::this_fiber::sleep_for(t);
+  }
+
   class service;
   using service_ptr = std::shared_ptr<service>;
   using service_wptr = std::weak_ptr<service>;
@@ -107,6 +113,7 @@ namespace asyik
           t.join();
         });
       };
+      io_service.stop();
       workers_initiated = false;
       stopped = true;
     };
@@ -129,12 +136,6 @@ namespace asyik
   };
 
   service_ptr make_service();
-
-  template <typename T>
-  void sleep_for(T &&t)
-  {
-    boost::this_fiber::sleep_for(t);
-  }
 
 } // namespace asyik
 
