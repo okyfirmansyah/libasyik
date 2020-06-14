@@ -287,12 +287,13 @@ namespace asyik
 
                   auto service = server->service.lock();
 
-                  auto new_ws = std::make_shared<websocket>(websocket::private_{},
-                                                            service->get_io_service().get_executor(),
-                                                            std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
-                                                            asyik_req);
+                  auto new_ws = std::make_shared<websocket_impl<beast::websocket::stream<ip::tcp::socket>>>
+                    (websocket_impl<beast::websocket::stream<ip::tcp::socket>>::private_{},
+                    service->get_io_service().get_executor(),
+                    std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
+                    asyik_req);
 
-                  asyik::internal::websocket::async_accept(*new_ws->ws_server, req);
+                  asyik::internal::websocket::async_accept(*new_ws->ws, req);
                   p->is_websocket = true;
 
                   try
@@ -373,78 +374,113 @@ namespace asyik
   }
 
   websocket_ptr make_websocket_connection(service_ptr as,
-                                          const std::string &host,
-                                          const std::string &port,
-                                          const std::string &path,
+                                          string_view url,
                                           const int timeout)
   {
-    tcp::resolver resolver(as->get_io_service().get_executor());
+    bool result;
+    http_url_scheme scheme;
+    
+    if(http_analyze_url(url, scheme))
+    {
+      tcp::resolver resolver(asio::make_strand(as->get_io_service()));
 
-    tcp::resolver::results_type results = internal::socket::async_resolve(resolver, host, port);
+      tcp::resolver::results_type results = 
+        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port));
 
-    auto new_ws = std::make_shared<websocket>(websocket::private_{}, as->get_io_service().get_executor(), host, port, path);
+      if(scheme.is_ssl)
+      {
+        // The SSL context is required, and holds certificates
+        ssl::context ctx(ssl::context::tlsv12_client);
 
-    new_ws->ws_client = std::make_shared<beast::websocket::stream<beast::tcp_stream>>(as->get_io_service().get_executor());
+        // This holds the root certificate used for verification
+        //load_root_certificates(ctx);
 
-    // Set the timeout for the operation
-    beast::get_lowest_layer(*new_ws->ws_client).expires_after(std::chrono::seconds(timeout));
+        ctx.set_default_verify_paths();
+        ctx.set_verify_mode(ssl::verify_peer);
 
-    // Make the connection on the IP address we get from a lookup
-    tcp::resolver::results_type::endpoint_type ep =
-        internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws_client), results);
+        auto new_ws = 
+          std::make_shared<websocket_impl<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>>
+            (websocket_impl<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>::private_{}, 
+             as->get_io_service().get_executor(), scheme.host, std::to_string(scheme.port), scheme.target);
 
-    // Turn off the timeout on the tcp_stream, because
-    // the websocket stream has its own timeout system.
-    beast::get_lowest_layer(beast::get_lowest_layer(*new_ws->ws_client)).expires_never();
+        new_ws->ws = std::make_shared<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>
+          (as->get_io_service().get_executor(), ctx);
 
-    // Set suggested timeout settings for the websocket
-    new_ws->ws_client->set_option(
-        beast::websocket::stream_base::timeout::suggested(
-            beast::role_type::client));
+        // Set the timeout for the operation
+        beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
-    // Set a decorator to change the User-Agent of the handshake
-    new_ws->ws_client->set_option(beast::websocket::stream_base::decorator(
-        [](beast::websocket::request_type &req) {
-          req.set(http::field::user_agent,
+        tcp::resolver::results_type::endpoint_type ep =
+          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results);
+
+        internal::ssl::async_handshake(new_ws->ws->next_layer(), ssl::stream_base::client).get();
+
+        // Turn off the timeout on the tcp_stream, because
+        // the websocket stream has its own timeout system.
+        beast::get_lowest_layer(beast::get_lowest_layer(*new_ws->ws)).expires_never();
+
+        // Set suggested timeout settings for the websocket
+        new_ws->ws->set_option(
+          beast::websocket::stream_base::timeout::suggested(
+              beast::role_type::client));
+
+        // Set a decorator to change the User-Agent of the handshake
+        new_ws->ws->set_option(beast::websocket::stream_base::decorator(
+          [](beast::websocket::request_type &req) {
+            req.set(http::field::user_agent,
                   std::string(BOOST_BEAST_VERSION_STRING) +
                       " websocket-client-async");
-        }));
+          }));
 
-    //Perform the websocket handshake
-    internal::websocket::async_handshake(*new_ws->ws_client, host, path);
+        //Perform the websocket handshake
+        if(scheme.port==80 || scheme.port==443)
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target);
+        else
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target);
 
-    return new_ws;
+        return new_ws;
+      }else
+      {
+        auto new_ws = 
+          std::make_shared<websocket_impl<beast::websocket::stream<beast::tcp_stream>>>
+            (websocket_impl<beast::websocket::stream<beast::tcp_stream>>::private_{}, 
+             as->get_io_service().get_executor(), scheme.host, std::to_string(scheme.port), scheme.target);
+
+        new_ws->ws = std::make_shared<beast::websocket::stream<beast::tcp_stream>>(as->get_io_service().get_executor());
+
+        // Set the timeout for the operation
+        beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
+
+        // Make the connection on the IP address we get from a lookup
+        tcp::resolver::results_type::endpoint_type ep =
+          internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results);
+
+        // Turn off the timeout on the tcp_stream, because
+        // the websocket stream has its own timeout system.
+        beast::get_lowest_layer(beast::get_lowest_layer(*new_ws->ws)).expires_never();
+
+        // Set suggested timeout settings for the websocket
+        new_ws->ws->set_option(
+          beast::websocket::stream_base::timeout::suggested(
+              beast::role_type::client));
+
+        // Set a decorator to change the User-Agent of the handshake
+        new_ws->ws->set_option(beast::websocket::stream_base::decorator(
+          [](beast::websocket::request_type &req) {
+            req.set(http::field::user_agent,
+                  std::string(BOOST_BEAST_VERSION_STRING) +
+                      " websocket-client-async");
+          }));
+
+        //Perform the websocket handshake
+        if(scheme.port==80 || scheme.port==443)
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host, scheme.target);
+        else
+          internal::websocket::async_handshake(*new_ws->ws, scheme.host+":"+std::to_string(scheme.port), scheme.target);
+
+        return new_ws;
+      }
+    }else return nullptr;
   }
-
-  std::string websocket::get_string()
-  {
-    std::string message;
-    auto buffer = asio::dynamic_buffer(message);
-
-    if (is_server_connection)
-      internal::websocket::async_read(*ws_server, buffer);
-    else
-      internal::websocket::async_read(*ws_client, buffer);
-    return message;
-  }
-
-  void websocket::send_string(string_view str)
-  {
-    if (is_server_connection)
-      internal::websocket::async_write(*ws_server, asio::buffer(str.data(), str.length()));
-    else
-      internal::websocket::async_write(*ws_client, asio::buffer(str.data(), str.length()));
-  }
-
-  void websocket::close(websocket_close_code code, string_view reason)
-  {
-    const boost::beast::websocket::close_reason cr(code, reason);
-    if (is_server_connection)
-      internal::websocket::async_close(*ws_server, cr);
-    else
-      internal::websocket::async_close(*ws_client, cr);
-  }
-
   
   http_request_ptr http_easy_request(service_ptr as, 
                                      string_view method, string_view url)
@@ -471,7 +507,7 @@ namespace asyik
       as->execute([=, &success]() {
         asyik::sleep_for(std::chrono::milliseconds(50 * i));
 
-        asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "127.0.0.1", "4004", "/" + std::to_string(i) + "/name/hash");
+        asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:4004/" + std::to_string(i) + "/name/hash");
 
         ws->send_string("halo");
         auto s = ws->get_string();
@@ -486,11 +522,30 @@ namespace asyik
         ws->close(websocket_close_code::normal, "closed normally");
       });
 
+    // check SSL websocket client(using external WSS server)
+    as->execute([=, &success]() {
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
+      asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "wss://echo.websocket.org");
+
+      ws->send_string("halo");
+      auto s = ws->get_string();
+      if (!s.compare("halo"))
+        success++;
+
+      ws->send_string("there");
+      s = ws->get_string();
+      if (!s.compare("there"))
+        success++;
+
+      ws->close(websocket_close_code::normal, "closed normally");
+    });
+
     // task to timeout entire service runtime
     as->execute([=, &success]() {
       for (int i = 0; i < 200; i++) //timeout 20s
       {
-        if (success >= 16)
+        if (success >= 18)
           break;
         asyik::sleep_for(std::chrono::milliseconds(100));
       }
@@ -498,7 +553,7 @@ namespace asyik
     });
 
     as->run();
-    REQUIRE(success == 16);
+    REQUIRE(success == 18);
   }
 
   TEST_CASE("Create http server and client, do some http communications", "[http]")

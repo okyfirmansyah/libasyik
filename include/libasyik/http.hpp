@@ -64,9 +64,7 @@ namespace asyik
   http_server_ptr make_http_server(service_ptr as, const std::string &addr, uint16_t port = 80);
   http_connection_ptr make_http_connection(service_ptr as, const std::string &addr, const std::string &port);
   websocket_ptr make_websocket_connection(service_ptr as,
-                                          const std::string &addr,
-                                          const std::string &port,
-                                          const std::string &path,
+                                          string_view url,
                                           int timeout = 10);
 
   http_request_ptr http_easy_request(service_ptr as, 
@@ -319,7 +317,50 @@ namespace asyik
                                               const std::map<string_view, string_view> &headers);
   };
 
+  
   class websocket : public std::enable_shared_from_this<websocket>
+  {
+  public:
+    virtual ~websocket(){};
+    websocket &operator=(const websocket &) = delete;
+    websocket() = delete;
+    websocket(const websocket &) = delete;
+    websocket(websocket &&) = default;
+    websocket &operator=(websocket &&) = default;
+
+  protected:
+    websocket(const std::string &host_, const std::string &port_, const std::string &path_)
+        : host(host_),
+          port(port_),
+          path(path_),
+          is_server_connection(false){};
+
+    template <typename req_type>
+    websocket(req_type &&req)
+        : request(std::forward<req_type>(req)),
+          is_server_connection(true){};
+
+    //API
+  public:
+    virtual std::string get_string(){};
+    virtual void send_string(string_view s){};
+    void close(websocket_close_code code)
+    {
+      close(code, "NORMAL");
+    }
+    virtual void close(websocket_close_code code, string_view reason){};
+    http_request_ptr request;
+
+  protected:
+    std::string host;
+    std::string port;
+    std::string path;
+
+    bool is_server_connection;
+  };
+  
+  template <typename StreamType>
+  class websocket_impl : public websocket
   {
   private:
     struct private_
@@ -327,51 +368,52 @@ namespace asyik
     };
 
   public:
-    ~websocket(){};
-    websocket &operator=(const websocket &) = delete;
-    websocket() = delete;
-    websocket(const websocket &) = delete;
-    websocket(websocket &&) = default;
-    websocket &operator=(websocket &&) = default;
+    virtual ~websocket_impl(){};
+    websocket_impl &operator=(const websocket_impl &) = delete;
+    websocket_impl() = delete;
+    websocket_impl(const websocket_impl &) = delete;
+    websocket_impl(websocket_impl &&) = default;
+    websocket_impl &operator=(websocket_impl &&) = default;
 
 
     template <typename executor_type>
-    websocket(struct private_ &&, const executor_type &io_service, const std::string &host_, const std::string &port_, const std::string &path_)
-        : host(host_),
-          port(port_),
-          path(path_),
-          is_server_connection(false){};
+    websocket_impl(struct private_ &&, const executor_type &io_service, const std::string &host_, const std::string &port_, const std::string &path_)
+        : websocket(host_, port_, path_){};
 
     template <typename executor_type, typename ws_type, typename req_type>
-    websocket(struct private_ &&, const executor_type &io_service, ws_type &&ws, req_type &&req)
-        : ws_server(std::forward<ws_type>(ws)),
-          request(std::forward<req_type>(req)),
-          is_server_connection(true){};
+    websocket_impl(struct private_ &&, const executor_type &io_service, ws_type &&ws, req_type &&req)
+        : websocket(std::forward<req_type>(req)),
+          ws(std::forward<ws_type>(ws)){};
 
     //API
-    std::string get_string();
-    void send_string(string_view s);
-    void close(websocket_close_code code)
+    virtual std::string get_string()
     {
-      close(code, "NORMAL");
+      std::string message;
+      auto buffer = asio::dynamic_buffer(message);
+
+      internal::websocket::async_read(*ws, buffer);
+      
+      return message;
     }
-    void close(websocket_close_code code, string_view reason);
-    http_request_ptr request;
+
+    virtual void send_string(string_view s)
+    {
+      internal::websocket::async_write(*ws, asio::buffer(s.data(), s.length()));
+    }
+
+    virtual void close(websocket_close_code code, string_view reason)
+    {
+      const boost::beast::websocket::close_reason cr(code, reason);
+      internal::websocket::async_close(*ws, cr);
+    }
 
   private:
     friend class http_connection;
     friend websocket_ptr make_websocket_connection(service_ptr as,
-                                                   const std::string &host,
-                                                   const std::string &port,
-                                                   const std::string &path,
+                                                   string_view url,
                                                    int timeout);
-    std::string host;
-    std::string port;
-    std::string path;
 
-    bool is_server_connection;
-    std::shared_ptr<beast::websocket::stream<ip::tcp::socket>> ws_server;
-    std::shared_ptr<beast::websocket::stream<beast::tcp_stream>> ws_client;
+    std::shared_ptr<StreamType> ws;
   };
 
   template<typename D>

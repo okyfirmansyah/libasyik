@@ -305,7 +305,7 @@ namespace asyik
             }
 
             template <typename Conn, typename... Args>
-            void async_close(Conn &con, Args &&... args)
+            auto async_close(Conn &con, Args &&... args)
             {
                 boost::fibers::promise<void> promise;
                 auto future = promise.get_future();
@@ -320,7 +320,7 @@ namespace asyik
                                 std::make_exception_ptr(std::runtime_error("read_error")));
                     });
 
-                return future.get();
+                return future;
             }
         } // namespace websocket
     }     //namespace internal
