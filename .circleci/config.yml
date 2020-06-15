@@ -2,15 +2,13 @@ version: 2.1
 orbs:
  codecov: codecov/codecov@1.0.2
 jobs:
- build:
-   docker:
-     - image: postgres:12-alpine
-       environment:
-         POSTGRES_PASSWORD: test
-         
+ build:  
    machine: true
    steps:
      - checkout
+     
+     # run test postgres
+     - run: docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine  
      
      # build the application image
      - run: docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
