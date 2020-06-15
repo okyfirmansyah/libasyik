@@ -64,8 +64,8 @@ namespace asyik
     using namespace soci;
     auto as = asyik::make_service();
 
-    // num_pool = 1, SOCI's sqlite not really support multi-pool :(
-    auto pool = make_sql_pool(asyik::sql_backend_sqlite3, "test.db", 1);
+    // run the pgsql for testing:  docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine
+    auto pool = make_sql_pool(asyik::sql_backend_postgresql, "host=localhost dbname=postgres password=test user=postgres", 4);
 
     {
       auto ses = pool->get_session(as);
@@ -134,8 +134,7 @@ namespace asyik
     using namespace soci;
     auto as = asyik::make_service();
 
-    // num_pool = 1, SOCI's sqlite not really support multi-pool :(
-    auto pool = make_sql_pool(asyik::sql_backend_sqlite3, "test.db", 1);
+    auto pool = make_sql_pool(asyik::sql_backend_postgresql, "host=localhost dbname=postgres password=test user=postgres", 4);
 
     {
       auto ses = pool->get_session(as);
@@ -165,7 +164,7 @@ namespace asyik
           ses->query("insert into persons(id, name) values(:id, :name)", use(id), use(name));
           tr.commit();
           // below transaction will be treated as no transaction exists
-          ses->query("insert into persons(id, name) values(:id, :name)", use(id2 + 1), use(name2));
+          ses->query("insert into persons(id, name) values(:id, :name)", use(id2 + 1000), use(name2));
         }
 
         { //aborted transaction
@@ -186,7 +185,7 @@ namespace asyik
         }
 
         int count;
-        ses->query("select count(*) from persons where id=:id1 or id=:id2 or id=:id3", use(id), use(id2), use(id2 + 1), into(count));
+        ses->query("select count(*) from persons where id=:id1 or id=:id2 or id=:id3", use(id), use(id2), use(id2 + 1000), into(count));
         REQUIRE(count == 3);
 
         int new_id;

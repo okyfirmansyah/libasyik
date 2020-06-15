@@ -3,6 +3,11 @@ orbs:
  codecov: codecov/codecov@1.0.2
 jobs:
  build:
+   docker:
+     - image: postgres:12-alpine
+       environment:
+         POSTGRES_PASSWORD: test
+         
    machine: true
    steps:
      - checkout
@@ -11,7 +16,7 @@ jobs:
      - run: docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
       
      # run test app
-     - run: docker run -it --rm -v ${PWD}/coverage:/mnt/coverage test-docker bash /usr/local/libasyik/tests/test_and_coverage.sh
+     - run: docker run -it --rm --network=host -v ${PWD}/coverage:/mnt/coverage test-docker bash /usr/local/libasyik/tests/test_and_coverage.sh
 
      - codecov/upload:
          file: coverage/libasyik_test.info
