@@ -123,13 +123,14 @@ void main()
 
 ## More Documentations
  - Features:
-   - Fiber Framework
-   - HTTP/Websocket
-   - SOCI/SQL
+   - [Logging](docs/logging.md)
+   - [Fiber Framework](docs/service.md)
+   - [HTTP/Websocket](docs/http.md)
+   - [SOCI/SQL](docs/sql.md)
  - Design/Rationale
-   - Why Fiber?
-   - Multithreading approach in Libasyik
-   - Integrating your library to Libasyik
+   - [Why Fiber?](docs/why.md)
+   - [Multithreading approach in Libasyik ](docs/designs.md)
+   - [Integrating your library to Libasyik](docs/integration.md)
  
  
 ## How to Build
