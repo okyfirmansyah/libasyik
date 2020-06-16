@@ -121,9 +121,18 @@ void main()
 }
 ```
 
+## More Documentations
+ - Features:
+   - Fiber Framework
+   - HTTP/Websocket
+   - SOCI/SQL
+ - Design/Rationale
+   - Why Fiber?
+   - Multithreading approach in Libasyik
+   - Integrating your library to Libasyik
+ 
+ 
 ## How to Build
-
-(todo)
 
 ### Requirements
 
@@ -131,7 +140,6 @@ void main()
  - boost library
  - CMake for build examples
  - Linking with tcmalloc/jemalloc is recommended for speed.
-
  - Now supporting VS2013 with limited functionality (only run-time check for url is available.)
 
 ### Building (Tests, Examples)
