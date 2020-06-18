@@ -1,5 +1,5 @@
 # System Design
-<img src="design.png" width="640" >
+<img src="design.png" width="800" >
 
 # Multithreading Approach
 <img src="free_fibers.png" width="480" >
