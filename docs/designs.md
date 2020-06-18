@@ -1,12 +1,12 @@
 # System Design
-<img src="design.png" height="100%" width="100%" >
+<img src="design.png" width="640" >
 
 # Multithreading Approach
-<img src="free_fibers.png" height="75%" width="75%" >
+<img src="free_fibers.png" width="480" >
 
-<img src="bounded_fibers.png" height="100%" width="100%" >
+<img src="bounded_fibers.png" width="640" >
 
 # Multithreading on Networking Approach
-<img src="single_acceptor.png" height="100%" width="100%" >
+<img src="single_acceptor.png" width="640" >
 
-<img src="multiple_acceptors.png" height="80%" width="80%" >
+<img src="multiple_acceptors.png" width="540" >
