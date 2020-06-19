@@ -1,7 +1,7 @@
 # libasyik
 [![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
-**Libasyik** is C++ microframework for highly scalable concurrent programming based on **boost::fiber** and **boost::asio**. 
+**Libasyik** is C++ microframework for highly scalable concurrent programming based on [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) and [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html). 
 
 Basic features containing web server, websockets, http clients, and database access functions.
 
@@ -29,7 +29,7 @@ void main()
 
  - High scalability
    - Based on lightweight thread using **Boost::Fiber** (easy to create **millions** of fibers!)
-   - Programming in synchronous fashions, 1 connection=1 Process, much easier than asynchronous chains
+   - Programming in synchronous fashions, but lightweight enough to implement **1 connection=1 Process** to simplify network programming models
    - Wraps **boost::asio** and **boost::beast** asynchronous APIs into "synchronous" libasyik's API's that generally much easier to use and programs
  - HTTP server easy routing
    - Pattern matching with arguments supported
@@ -37,7 +37,7 @@ void main()
  - SQL access APIs based on **SOCI**
    - Support **PostgreSQL** and **SQLite** backends
    - Wrapped as "synchronous" APIs for lightweight threads/fibers
- - Very Fast
+ - Build in logging based on [Aixlog](https://github.com/badaix/aixlog)
    
 ## Examples
 
@@ -137,31 +137,25 @@ void main()
 
 ### Requirements
 
- - C++ compiler with good C++17 support (tested with g++>=6.0.0)
- - boost library
- - CMake for build examples
- - Linking with tcmalloc/jemalloc is recommended for speed.
- - Now supporting VS2013 with limited functionality (only run-time check for url is available.)
+ - C++ compiler with good C++17 support (tested with GCC 7.5.0)
+ - Boost library with Boost::context, Boost::fiber, and Boost::asio(Boost version 1.70.0 or above recommended)
+ - CMake > 3.12
+ - SOCI with SQLite and PostgreSQL backend and required low level libraries
+ - See [Dockerfile](Dockerfile) to have a direct example of build environment
 
-### Building (Tests, Examples)
+### Building and Including in a Project
 
-Out-of-source build with CMake is recommended.
+After all environment requirements, demonstrated in [Dockerfile](Dockerfile) are done, do this following steps:
 
 ```
-mkdir build
-cd build
-cmake ..
-make
+ cd ~
+ git clone https://github.com/okyfirmansyah/libasyik
+ cd ~/libasyik
+ git submodule update --init --recursive
+ mkdir build
+ cd build
+ cmake -DCMAKE_BUILD_TYPE=Debug ..
+ make -j4
+ make install
 ```
-
-You can run tests with following commands:
-```
-ctest
-```
-
-
-### Attributions
-
-Libasyik uses the following libraries.
-
  
