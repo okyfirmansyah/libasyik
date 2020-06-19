@@ -19,6 +19,20 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
                                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
-target_link_libraries(${PROJECT_NAME} libasyik Catch2::Catch2)
+target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME} Catch2::Catch2)
 
+install(
+  TARGETS ${PROJECT_NAME}
+  LIBRARY DESTINATION  "${CMAKE_INSTALL_LIBDIR}"
+)
 
+install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+
+install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/external/aixlog/include/
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
+)
