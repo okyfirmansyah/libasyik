@@ -20,11 +20,12 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
 target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
-target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME} Catch2::Catch2)
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME})
 
 install(
   TARGETS ${PROJECT_NAME}
-  LIBRARY DESTINATION  "${CMAKE_INSTALL_LIBDIR}"
+  EXPORT ${PROJECT_NAME}
+  DESTINATION  "${CMAKE_INSTALL_LIBDIR}"
 )
 
 install(
@@ -35,4 +36,13 @@ install(
 install(
     DIRECTORY ${CMAKE_SOURCE_DIR}/external/aixlog/include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
+)
+
+install(
+    FILES ${PROJECT_NAME}-config.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+)
+
+install(
+    EXPORT ${PROJECT_NAME}
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
 )
