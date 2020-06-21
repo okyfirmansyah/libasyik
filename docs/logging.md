@@ -1,7 +1,7 @@
 For logging, Libasyik is equipped with simple logging framework based on [Aixlog](https://github.com/badaix/aixlog).
 
 For example test.cpp:
-```
+```c++
 #include "aixlog.hpp"
 #include "libasyik/service.hpp"
 
