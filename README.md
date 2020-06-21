@@ -91,7 +91,7 @@ void main()
         ws->send_string(s); //echo
       }
 
-      ws->close(websocket_close_code::normal, "closed normally");
+      ws->close(asyik::websocket_close_code::normal, "closed normally");
     });
 
     as->run();
@@ -145,7 +145,7 @@ void main()
 
 ### Building and Including in a Project
 
-After all environment requirements, demonstrated in [Dockerfile](Dockerfile) are done, do this following steps:
+After all environment requirements demonstrated in [Dockerfile](Dockerfile) are done, do this following steps:
 
 ```
  cd ~
@@ -154,8 +154,47 @@ After all environment requirements, demonstrated in [Dockerfile](Dockerfile) are
  git submodule update --init --recursive
  mkdir build
  cd build
- cmake -DCMAKE_BUILD_TYPE=Debug ..
+ cmake ..
  make -j4
  make install
 ```
- 
+After that, Libasyik is now ready to be included in new project.
+As example use following CMakeLists.txt template to invoke Libasyik using **find_package()**:
+```
+cmake_minimum_required(VERSION 3.14)
+project(test_asyik)
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(${PROJECT_NAME} test.cpp) # add more source code here
+
+#######
+#include other dependencies
+#######
+find_package(libasyik)
+if(libasyik_FOUND)
+    target_include_directories(${PROJECT_NAME} PUBLIC ${libasyik_INCLUDE_DIR})
+    target_link_libraries(${PROJECT_NAME} libasyik)
+endif()
+
+find_package(Boost COMPONENTS context fiber REQUIRED)
+if(Boost_FOUND)
+    target_include_directories(${PROJECT_NAME} PUBLIC ${Boost_INCLUDE_DIR})
+    target_link_libraries(${PROJECT_NAME} Boost::fiber Boost::context)
+endif()
+
+
+find_package(SOCI REQUIRED)
+if(SOCI_FOUND)
+    target_include_directories(${PROJECT_NAME} PUBLIC /usr/include/postgresql)
+    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci)
+    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci/postgresql)
+    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci/sqlite3)
+    target_link_libraries(${PROJECT_NAME} SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
+endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(${PROJECT_NAME} Threads::Threads)
+
+find_package(OpenSSL REQUIRED)
+target_link_libraries(${PROJECT_NAME} OpenSSL::SSL)
+```
