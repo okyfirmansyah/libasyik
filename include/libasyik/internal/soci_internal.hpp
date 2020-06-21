@@ -1,5 +1,5 @@
-#ifndef LIBASYIK_ASYIK_ASIO_INTERNAL_HPP
-#define LIBASYIK_ASYIK_ASIO_INTERNAL_HPP
+#ifndef LIBASYIK_ASYIK_SOCI_INTERNAL_HPP
+#define LIBASYIK_ASYIK_SOCI_INTERNAL_HPP
 #include <string>
 
 #include <boost/asio.hpp>
