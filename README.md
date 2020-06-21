@@ -73,13 +73,6 @@ void main()
 {
     auto as = asyik::make_service();
     auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
-
-    // serve http request
-    server->on_http_request("/hello", "GET", [](auto req, auto args)
-    {
-      req->response.body = "Hello world!";
-      req->response.result(200);
-    });
     
     // serve websocket
     server->on_websocket("/websocket", [](auto ws, auto args) 
@@ -100,13 +93,10 @@ void main()
 
 #### SQL Database
 ```c++
-#include "libasyik/service.hpp"
 #include "libasyik/sql.hpp"
-
-void main()
+...
+void some_handler(asyik::service_ptr as)
 {
-    auto as = asyik::make_service();
-
     auto pool = make_sql_pool(asyik::sql_backend_sqlite3, "test.db", 1);
     auto ses = pool->get_session(as);
 
@@ -121,7 +111,7 @@ void main()
 }
 ```
 
-## More Documentations
+## More Documentations(Work In Progress)
  - Features:
    - [Logging](docs/logging.md)
    - [Fiber Framework](docs/service.md)
