@@ -129,7 +129,7 @@ int main()
  }
 ```
 
-We can also use other [Boost::Fiber's synchronization options](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/fiber/synchronization.html) to support other fiber interaction use cases.
+We can also use [Boost::Fiber's synchronization options](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/fiber/synchronization.html) to support other fiber interaction use cases.
 
 ### Communicate Between Fiber using Channel
 
