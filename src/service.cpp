@@ -46,6 +46,8 @@ namespace asyik
       }
       else
         idle_threshold = 10000;
+      if(!stopped)
+        io_service.restart();
     }
     for (int i = 0; i < 10000; i++)
     {
