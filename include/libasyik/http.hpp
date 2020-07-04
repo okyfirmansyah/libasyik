@@ -28,18 +28,24 @@ namespace asyik
 {
   void _TEST_invoke_http();
 
+  template <typename StreamType>
   class http_connection;
-  using http_connection_ptr = std::shared_ptr<http_connection>;
-  using http_connection_wptr = std::weak_ptr<http_connection>;
+  template <typename StreamType>
+  using http_connection_ptr = std::shared_ptr<http_connection<StreamType>>;
+  template <typename StreamType>
+  using http_connection_wptr = std::weak_ptr<http_connection<StreamType>>;
 
   class websocket;
   using websocket_ptr = std::shared_ptr<websocket>;
 
   using http_route_args = std::vector<std::string>;
 
+  template <typename StreamType>
   class http_server;
-  using http_server_ptr = std::shared_ptr<http_server>;
-  using http_server_wptr = std::weak_ptr<http_server>;
+  template <typename StreamType>
+  using http_server_ptr = std::shared_ptr<http_server<StreamType>>;
+  template <typename StreamType>
+  using http_server_wptr = std::weak_ptr<http_server<StreamType>>;
 
   class http_request;
   using http_request_ptr = std::shared_ptr<http_request>;
@@ -61,20 +67,24 @@ namespace asyik
 
   using websocket_close_code = boost::beast::websocket::close_code;
 
-  http_server_ptr make_http_server(service_ptr as, string_view addr, uint16_t port = 80);
-  http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
+  using http_stream_type = tcp::socket;
+  using https_stream_type = beast::ssl_stream<tcp::socket&>;
+
+  http_server_ptr<http_stream_type> make_http_server(service_ptr as, string_view addr, uint16_t port = 80);
+  http_server_ptr<https_stream_type> make_https_server(service_ptr, ssl::context &&ssl, string_view, uint16_t port = 443);
+  //http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
   websocket_ptr make_websocket_connection(service_ptr as,
                                           string_view url,
                                           int timeout = 10);
 
-  http_request_ptr http_easy_request(service_ptr as, 
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url);
-  template<typename D>
-  http_request_ptr http_easy_request(service_ptr as, 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url, D &&data);
 
-  template<typename D>
-  http_request_ptr http_easy_request(service_ptr as, 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url, D &&data,
                                      const std::map<string_view, string_view> &headers);
 
@@ -93,7 +103,8 @@ namespace asyik
     std::string route_spec_to_regex(string_view route_spc);
   }
 
-  class http_server : public std::enable_shared_from_this<http_server>
+  template <typename StreamType>
+  class http_server : public std::enable_shared_from_this<http_server<StreamType>>
   {
   private:
     struct private_
@@ -195,11 +206,16 @@ namespace asyik
     std::vector<http_route_tuple> http_routes;
     std::vector<websocket_route_tuple> ws_routes;
 
+    std::shared_ptr<ssl::context> ssl_context;
+
+    template <typename S>
     friend class http_connection;
-    friend http_server_ptr make_http_server(service_ptr, string_view , uint16_t);
+    friend http_server_ptr<http_stream_type> make_http_server(service_ptr, string_view, uint16_t);
+    friend http_server_ptr<https_stream_type> make_https_server(service_ptr, ssl::context &&ssl, string_view, uint16_t);
   };
 
-  class http_connection : public std::enable_shared_from_this<http_connection>
+  template <typename StreamType>
+  class http_connection : public std::enable_shared_from_this<http_connection<StreamType>>
   {
   private:
     struct private_
@@ -216,32 +232,48 @@ namespace asyik
 
     // constructor for server connection
     template <typename executor_type>
-    http_connection(struct private_ &&, const executor_type &io_service, http_server_ptr server)
-        : http_server(http_server_wptr(server)),
+    http_connection(struct private_ &&, const executor_type &io_service, http_server_ptr<http_stream_type> server)
+        : http_server(http_server_wptr<StreamType>(server)),
           socket(io_service),
+          stream(std::move(socket)),
+          is_websocket(false),
+          is_server_connection(true){};
+
+    template <typename executor_type>
+    http_connection(struct private_ &&, const executor_type &io_service, http_server_ptr<https_stream_type> server)
+        : http_server(http_server_wptr<StreamType>(server)),
+          socket(io_service),
+          ssl_context(server->ssl_context),
+          stream(socket, *ssl_context),
           is_websocket(false),
           is_server_connection(true){};
 
     // constructor for client connection
-    template <typename executor_type>
-    http_connection(struct private_ &&, const executor_type &io_service)
-        : http_server(nullptr),
-          socket(io_service),
-          is_websocket(false),
-          is_server_connection(false){};
+    // template <typename executor_type>
+    // http_connection(struct private_ &&, const executor_type &io_service)
+    //     : http_server(nullptr),
+    //       socket(io_service),
+    //       stream(socket),
+    //       is_websocket(false),
+    //       is_server_connection(false){};
 
-    ip::tcp::socket &get_socket() { return socket; };
+    StreamType &get_stream() { return stream; };
 
   private:
     void start();
+    inline void handshake_if_ssl();
+    inline void shutdown_ssl();
 
-    http_server_wptr http_server;
-    ip::tcp::socket socket;
+    http_server_wptr<StreamType> http_server;
+    tcp::socket socket;
+    std::shared_ptr<ssl::context> ssl_context;
+    StreamType stream;
     bool is_websocket;
     bool is_server_connection;
 
+    template <typename S>
     friend class http_server;
-    friend http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
+    //friend http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port);
   };
 
   class http_request : public std::enable_shared_from_this<http_request>
@@ -306,18 +338,18 @@ namespace asyik
       };
     } response;
 
-    private:
+  private:
     boost::beast::flat_buffer buffer;
 
+    template <typename StreamType>
     friend class http_connection;
 
-    template<typename D>
-    friend http_request_ptr http_easy_request(service_ptr as, 
+    template <typename D>
+    friend http_request_ptr http_easy_request(service_ptr as,
                                               string_view method, string_view url, D &&data,
                                               const std::map<string_view, string_view> &headers);
   };
 
-  
   class websocket : public std::enable_shared_from_this<websocket>
   {
   public:
@@ -358,7 +390,7 @@ namespace asyik
 
     bool is_server_connection;
   };
-  
+
   template <typename StreamType>
   class websocket_impl : public websocket
   {
@@ -374,7 +406,6 @@ namespace asyik
     websocket_impl(const websocket_impl &) = delete;
     websocket_impl(websocket_impl &&) = default;
     websocket_impl &operator=(websocket_impl &&) = default;
-
 
     template <typename executor_type>
     websocket_impl(struct private_ &&, const executor_type &io_service, string_view host_, string_view port_, string_view path_)
@@ -392,7 +423,7 @@ namespace asyik
       auto buffer = asio::dynamic_buffer(message);
 
       internal::websocket::async_read(*ws, buffer).get();
-      
+
       return message;
     }
 
@@ -408,6 +439,7 @@ namespace asyik
     }
 
   private:
+    template <typename S>
     friend class http_connection;
     friend websocket_ptr make_websocket_connection(service_ptr as,
                                                    string_view url,
@@ -416,44 +448,43 @@ namespace asyik
     std::shared_ptr<StreamType> ws;
   };
 
-  template<typename D>
-  http_request_ptr http_easy_request(service_ptr as, 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url, D &&data,
                                      const std::map<string_view, string_view> &headers)
   {
     bool result;
     http_url_scheme scheme;
-    
-    if(http_analyze_url(url, scheme))
-    {
-      auto req=std::make_shared<http_request>();
 
-      if(scheme.port==80 || scheme.port==443)
+    if (http_analyze_url(url, scheme))
+    {
+      auto req = std::make_shared<http_request>();
+
+      if (scheme.port == 80 || scheme.port == 443)
         req->headers.set("Host", scheme.host);
       else
-        req->headers.set("Host", scheme.host+":"+std::to_string(scheme.port));
+        req->headers.set("Host", scheme.host + ":" + std::to_string(scheme.port));
       req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
       req->headers.set("Content-Type", "text/html");
 
       // user-overidden headers
       std::for_each(headers.cbegin(), headers.cend(),
-        [&req](const auto &item)
-        {
-          req->headers.set(item.first, item.second);
-        });
-    
-      req->body=std::forward<D>(data);
+                    [&req](const auto &item) {
+                      req->headers.set(item.first, item.second);
+                    });
+
+      req->body = std::forward<D>(data);
       req->method(method);
       req->target(scheme.target);
       req->beast_request.keep_alive(false);
 
       req->beast_request.prepare_payload();
-      
-      tcp::resolver resolver(as->get_io_service().get_executor());
-      tcp::resolver::results_type results = 
-        internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
 
-      if(scheme.is_ssl)
+      tcp::resolver resolver(as->get_io_service().get_executor());
+      tcp::resolver::results_type results =
+          internal::socket::async_resolve(resolver, scheme.host, std::to_string(scheme.port)).get();
+
+      if (scheme.is_ssl)
       {
         // The SSL context is required, and holds certificates
         ssl::context ctx(ssl::context::tlsv12_client);
@@ -462,8 +493,7 @@ namespace asyik
         //load_root_certificates(ctx);
 
         ctx.set_default_verify_paths();
-        ctx.set_verify_mode(ssl::verify_peer);
-        
+        ctx.set_verify_mode(ssl::verify_none); //!!!
 
         beast::ssl_stream<beast::tcp_stream> stream(as->get_io_service().get_executor(), ctx);
 
@@ -472,13 +502,20 @@ namespace asyik
         internal::http::async_write(stream, req->beast_request);
         internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
 
-        internal::ssl::async_shutdown(stream).get();
+        try{internal::ssl::async_shutdown(stream).get();}
+        catch(...)
+        {
+          //it's okay, we need both parties to close SSL gracefully,
+          //but it's not always the case
+          //https://stackoverflow.com/questions/25587403/boost-asio-ssl-async-shutdown-always-finishes-with-an-error
+        }
 
         return req;
-      }else
+      }
+      else
       {
         beast::tcp_stream stream(as->get_io_service().get_executor());
-      
+
         internal::socket::async_connect(stream, results).get();
         internal::http::async_write(stream, req->beast_request);
         internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
@@ -486,22 +523,209 @@ namespace asyik
         beast::error_code ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 
-        if(ec && ec != beast::errc::not_connected)
-          throw beast::system_error{ec};
-
         return req;
       }
-    }else 
+    }
+    else
       return nullptr;
   };
 
-  template<typename D>
-  http_request_ptr http_easy_request(service_ptr as, 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url, D &&data)
   {
     return http_easy_request(as, method, url, std::forward<D>(data), {});
   };
 
+  template <>
+  inline void http_connection<http_stream_type>::handshake_if_ssl()
+  {
+  }
+
+  template <>
+  inline void http_connection<https_stream_type>::handshake_if_ssl()
+  {
+    internal::ssl::async_handshake(stream, ssl::stream_base::server).get();
+  }
+
+  template <>
+  inline void http_connection<http_stream_type>::shutdown_ssl()
+  {
+  }
+
+  template <>
+  inline void http_connection<https_stream_type>::shutdown_ssl()
+  {
+    internal::ssl::async_shutdown(stream).get();
+  }
+
+  template <typename StreamType>
+  void http_connection<StreamType>::start()
+  {
+    if (auto server = http_server.lock())
+    {
+      if (auto service = server->service.lock())
+      {
+        service->execute([p = this->shared_from_this()](void) {
+          try
+          {
+            ip::tcp::no_delay option(true);
+            beast::get_lowest_layer(p->get_stream()).set_option(option);
+
+            p->handshake_if_ssl();
+
+            auto asyik_req = std::make_shared<http_request>();
+            auto &req = asyik_req->beast_request;
+            while (1)
+            {
+              asyik::internal::http::async_read(p->get_stream(), asyik_req->buffer, req).get();
+
+              // See if its a WebSocket upgrade request
+              if (beast::websocket::is_upgrade(req))
+              {
+                // Clients SHOULD NOT begin sending WebSocket
+                // frames until the server has provided a response.
+                if (asyik_req->buffer.size() != 0)
+                  throw std::make_exception_ptr(std::runtime_error("unexpected data before websocket handshake!"));
+
+                try
+                {
+                  if (p->http_server.expired())
+                    throw std::make_exception_ptr(std::runtime_error("server expired"));
+
+                  auto server = p->http_server.lock();
+
+                  http_route_args args;
+                  const websocket_route_tuple &route = server->find_websocket_route(req, args);
+
+                  // Construct the str ;o,\eam, transferring ownership of the socket
+                  if (server->service.expired())
+                    throw std::make_exception_ptr(std::runtime_error("service expired"));
+
+                  auto service = server->service.lock();
+
+                  auto new_ws = std::make_shared<websocket_impl<beast::websocket::stream<StreamType>>>(typename websocket_impl<beast::websocket::stream<StreamType>>::private_{},
+                                                                                                       service->get_io_service().get_executor(),
+                                                                                                       std::make_shared<beast::websocket::stream<StreamType>>(std::move(p->get_stream())),
+                                                                                                       asyik_req);
+
+                  asyik::internal::websocket::async_accept(*new_ws->ws, req).get();
+                  p->is_websocket = true;
+
+                  try
+                  {
+                    std::get<2>(route)(new_ws, args);
+                  }
+                  catch (...)
+                  {
+                    LOG(ERROR) << "uncaught error in routing handler: " << req.target() << "\n";
+                  }
+                }
+                catch (...)
+                {
+                }
+                return;
+              }
+              else
+              {
+                // Its not a WebSocket upgrade, so
+                // handle it like a normal HTTP request.
+                auto &res = asyik_req->response.beast_response;
+
+                http_response_headers &res_header = res.base();
+                http_response_body &res_body = res.body();
+                asyik_req->response.headers.set(http::field::server, LIBASYIK_VERSION_STRING);
+                asyik_req->response.headers.set(http::field::content_type, "text/html");
+                asyik_req->response.beast_response.keep_alive(asyik_req->beast_request.keep_alive());
+
+                // pretty much should be improved
+                try
+                {
+                  if (p->http_server.expired())
+                    throw std::make_exception_ptr(std::runtime_error("server expired"));
+                  auto server = p->http_server.lock();
+
+                  bool found = false;
+                  try
+                  {
+                    http_route_args args;
+                    const http_route_tuple &route = server->find_http_route(req, args);
+                    found = true;
+
+                    std::get<2>(route)(asyik_req, args);
+                  }
+                  catch (...)
+                  {
+                    asyik_req->response.body = "";
+                    if (!found)
+                      asyik_req->response.result(404);
+                    else
+                      asyik_req->response.result(500);
+                    asyik_req->response.beast_response.keep_alive(false);
+                  }
+                }
+                catch (...)
+                {
+                  asyik_req->response.body = "";
+                  asyik_req->response.result(500);
+                  asyik_req->response.beast_response.keep_alive(false);
+                };
+
+                asyik_req->response.beast_response.prepare_payload();
+                http::serializer<false, http::string_body> sr{res};
+                asyik::internal::http::async_write(p->get_stream(), res).get();
+
+                if (!req.need_eof())
+                  break;
+              }
+            }
+            p->shutdown_ssl();
+          }
+          catch (std::exception &e)
+          {
+            LOG(WARNING) << "exception is catched during client connection, reason: " << e.what() << "\n";
+          };
+        });
+      };
+    };
+  }
+
+  template <typename StreamType>
+  http_server<StreamType>::http_server(struct private_ &&, service_ptr as, string_view addr, uint16_t port)
+      : service(as)
+  {
+    acceptor = std::make_shared<ip::tcp::acceptor>(as->get_io_service(),
+                                                   ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port), true);
+    if (!acceptor)
+      throw std::runtime_error("could not allocate TCP acceptor");
+  }
+
+  template <typename StreamType>
+  void http_server<StreamType>::start_accept(asio::io_context &io_service)
+  {
+    auto new_connection = std::make_shared<http_connection<StreamType>>(typename http_connection<StreamType>::private_{}, 
+                                                                        io_service.get_executor(), this->shared_from_this());
+
+    acceptor->async_accept(
+        beast::get_lowest_layer(new_connection->get_stream()),
+        [new_connection, p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())]
+          (const boost::system::error_code &error) {
+          if (!p.expired() && !error)
+          {
+            auto ps = p.lock();
+            new_connection->start();
+            if (!ps->service.expired())
+            {
+              auto service = ps->service.lock();
+              ps->start_accept(service->get_io_service());
+            }
+          }
+          else
+          {
+            LOG(WARNING) << "async_accept error or canceled\n";
+          }
+        });
+  }
 } // namespace asyik
 
 #endif

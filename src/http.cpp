@@ -82,49 +82,25 @@ namespace asyik
       return false;
   }
 
-  http_server::http_server(struct private_ &&, service_ptr as, string_view addr, uint16_t port)
-      : service(as)
+  http_server_ptr<http_stream_type> make_http_server(service_ptr as, string_view addr, uint16_t port)
   {
-    acceptor = std::make_shared<ip::tcp::acceptor>(as->get_io_service(),
-                                                   ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port), true);
-    if (!acceptor)
-      throw std::runtime_error("could not allocate TCP acceptor");
-  }
-
-  http_server_ptr make_http_server(service_ptr as, string_view addr, uint16_t port)
-  {
-    auto p = std::make_shared<http_server>(http_server::private_{}, as, addr, port);
+    auto p = std::make_shared<http_server<http_stream_type>>(http_server<http_stream_type>::private_{}, as, addr, port);
 
     p->start_accept(as->get_io_service());
     return p;
   }
 
-  void http_server::start_accept(asio::io_context &io_service)
+  http_server_ptr<https_stream_type> make_https_server(service_ptr as, ssl::context&& ssl, string_view addr, uint16_t port)
   {
-    auto new_connection = std::make_shared<http_connection>(http_connection::private_{}, io_service.get_executor(), shared_from_this());
+    auto p = std::make_shared<http_server<https_stream_type>>(http_server<https_stream_type>::private_{}, as, addr, port);
+    p->ssl_context = std::make_shared<ssl::context>(std::move(ssl));
 
-    acceptor->async_accept(
-        new_connection->get_socket(),
-        [new_connection, p = std::weak_ptr<http_server>(shared_from_this())](const boost::system::error_code &error) {
-          if (!p.expired() && !error)
-          {
-            auto ps = p.lock();
-            new_connection->start();
-            if (!ps->service.expired())
-            {
-              auto service = ps->service.lock();
-              ps->start_accept(service->get_io_service());
-            }
-          }
-          else
-          {
-            LOG(WARNING) << "async_accept error or canceled";
-          }
-        });
+    p->start_accept(as->get_io_service());
+    return p;
   }
 
-  http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port)
-  {
+  //http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port)
+  //{
     // tcp::resolver resolver(as->get_io_service().get_executor());
 
     // tcp::resolver::results_type results=internal::socket::async_resolve(resolver, addr, port).get();
@@ -144,140 +120,8 @@ namespace asyik
 
     //         });
 
-    return nullptr;
-  }
-
-  void http_connection::start()
-  {
-    if (auto server = http_server.lock())
-    {
-      if (auto service = server->service.lock())
-      {
-        service->execute([p = shared_from_this()](void) {
-          try
-          {
-            ip::tcp::no_delay option(true);
-            p->get_socket().set_option(option);
-
-            // This buffer is required for reading HTTP messages
-            //boost::beast::flat_buffer buffer;
-
-            // Read the HTTP request ourselves
-            //http_beast_request req;
-            auto asyik_req = std::make_shared<http_request>();
-            auto &req = asyik_req->beast_request;
-            while (1)
-            {
-              asyik::internal::http::async_read(p->get_socket(), asyik_req->buffer, req).get();
-
-              // See if its a WebSocket upgrade request
-              if (beast::websocket::is_upgrade(req))
-              {
-                // Clients SHOULD NOT begin sending WebSocket
-                // frames until the server has provided a response.
-                if (asyik_req->buffer.size() != 0)
-                  throw std::make_exception_ptr(std::runtime_error("unexpected data before websocket handshake!"));
-
-                try
-                {
-                  if (p->http_server.expired())
-                    throw std::make_exception_ptr(std::runtime_error("server expired"));
-
-                  auto server = p->http_server.lock();
-
-                  http_route_args args;
-                  const websocket_route_tuple &route = server->find_websocket_route(req, args);
-
-                  // Construct the str ;o,\eam, transferring ownership of the socket
-                  if (server->service.expired())
-                    throw std::make_exception_ptr(std::runtime_error("service expired"));
-
-                  auto service = server->service.lock();
-
-                  auto new_ws = std::make_shared<websocket_impl<beast::websocket::stream<ip::tcp::socket>>>(websocket_impl<beast::websocket::stream<ip::tcp::socket>>::private_{},
-                                                                                                            service->get_io_service().get_executor(),
-                                                                                                            std::make_shared<beast::websocket::stream<ip::tcp::socket>>(std::move(p->get_socket())),
-                                                                                                            asyik_req);
-
-                  asyik::internal::websocket::async_accept(*new_ws->ws, req).get();
-                  p->is_websocket = true;
-
-                  try
-                  {
-                    std::get<2>(route)(new_ws, args);
-                  }
-                  catch (...)
-                  {
-                    LOG(ERROR) << "uncaught error in routing handler: " << req.target() << "\n";
-                  }
-                }
-                catch (...)
-                {
-                }
-                return;
-              }
-              else
-              {
-                // Its not a WebSocket upgrade, so
-                // handle it like a normal HTTP request.
-                auto &res = asyik_req->response.beast_response;
-
-                http_response_headers &res_header = res.base();
-                http_response_body &res_body = res.body();
-                asyik_req->response.headers.set(http::field::server, LIBASYIK_VERSION_STRING);
-                asyik_req->response.headers.set(http::field::content_type, "text/html");
-                asyik_req->response.beast_response.keep_alive(asyik_req->beast_request.keep_alive());
-
-                // pretty much should be improved
-                try
-                {
-                  if (p->http_server.expired())
-                    throw std::make_exception_ptr(std::runtime_error("server expired"));
-                  auto server = p->http_server.lock();
-
-                  bool found = false;
-                  try
-                  {
-                    http_route_args args;
-                    const http_route_tuple &route = server->find_http_route(req, args);
-                    found = true;
-
-                    std::get<2>(route)(asyik_req, args);
-                  }
-                  catch (...)
-                  {
-                    asyik_req->response.body = "";
-                    if (!found)
-                      asyik_req->response.result(404);
-                    else
-                      asyik_req->response.result(500);
-                    asyik_req->response.beast_response.keep_alive(false);
-                  }
-                }
-                catch (...)
-                {
-                  asyik_req->response.body = "";
-                  asyik_req->response.result(500);
-                  asyik_req->response.beast_response.keep_alive(false);
-                };
-
-                asyik_req->response.beast_response.prepare_payload();
-                http::serializer<false, http::string_body> sr{res};
-                asyik::internal::http::async_write(p->get_socket(), res).get();
-
-                if (!req.need_eof())
-                  break;
-              }
-            }
-          }
-          catch (std::exception &e)
-          {
-            LOG(WARNING) << "exception is catched during client connection, reason: " << e.what() << "\n";
-          };
-        });
-      };
-    };
-  }
+  //  return nullptr;
+  //}
 
   websocket_ptr make_websocket_connection(service_ptr as,
                                           string_view url,
@@ -302,7 +146,7 @@ namespace asyik
         //load_root_certificates(ctx);
 
         ctx.set_default_verify_paths();
-        ctx.set_verify_mode(ssl::verify_peer);
+        ctx.set_verify_mode(ssl::verify_none); //!!!
 
         using stream_type = beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
         auto new_ws =
