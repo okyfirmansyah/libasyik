@@ -149,3 +149,125 @@ void main()
     as->run();
 }
 ```
+
+#### Create SSL Server
+To create HTTPS server, use the same templates but now using **make_https_server()**, for e.g:
+```c++
+#include "libasyik/service.hpp"
+#include "libasyik/http.hpp"
+
+int main()
+{
+    auto as = asyik::make_service();
+
+    // The SSL context is required, and holds certificates
+    ssl::context ctx{ssl::context::tlsv12};
+
+    // This holds the self-signed certificate used by the server
+    load_server_certificate(ctx);
+
+    auto server = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 443);
+
+    server->on_websocket("/ws", [](auto ws, auto args) {
+      auto s = ws->get_string();
+      ws->send_string(s);
+
+      ws->close(websocket_close_code::normal, "closed normally");
+    });
+
+    server->on_http_request("/", "GET", [](auto req, auto args) {
+      req->response.body = "hello world";
+      req->response.result(200);
+    });
+    
+    as->run();
+}
+```
+Please take a look at [Beast's example](https://www.boost.org/doc/libs/1_73_0/libs/beast/example/common/server_certificate.hpp) for an example on how to perform SSL context creation/**load_server_certificate()**.
+
+#### Advanced Topic: Handle HTTP Connection and Its Responses Manually
+Sometimes we want to do something different that simple HTTP request and response, one use case is doing server side event stream(SSE) so the client can have mutiple datas/events, transmitted in realtime and on a single, long connection.
+
+Currently, libasyik only support limited APIs to support this, basically you handle HTTP request using a handler like before, then acquire underlying TCP or SSL stream from the request object, finally we call **req->activate_direct_response_handling()** to signal framework that the HTTP connection is now under handler's fiber control.
+
+Thanks to fiber programming model, it's easy to switch from usual short-lived handler into long-lived fiber connection handler. For example, consider a SSE server:
+```c++
+// create wrapper for ASIO's stream async_send(SSL/TCP stream)
+template <typename Conn, typename... Args>
+auto async_send(Conn &con, Args &&... args)
+{
+    boost::fibers::promise<std::size_t> promise;
+    auto future = promise.get_future();
+
+    con.async_write_some(
+      std::forward<Args>(args)...,
+      [prom = std::move(promise)](const boost::system::error_code &ec,
+                                  std::size_t size) mutable {
+        if (!ec)
+          prom.set_value(size);
+        else
+          prom.set_exception(
+            std::make_exception_ptr(std::runtime_error("send error")));
+      });
+    return std::move(future);
+}
+
+int main()
+{
+    auto as = asyik::make_service();
+
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
+
+    server->on_http_request("/sse", "GET", [server](auto req, auto args) {
+        auto connection = req->get_connection_handle(server);
+        auto &stream = connection->get_stream();
+        req->activate_direct_response_handling();
+
+        // at this point we own connection/stream directly..
+        std::string s= "HTTP/1.1 200 OK\r\n"
+                       "Connection: keep-alive\r\n"
+                       "Content-type: text/event-stream\r\n\r\n"
+                       "retry: 5000\r\n\r\n";
+        async_send(stream,  asio::buffer(s.data(), s.length())).get();
+
+        // now sending stream of events indefinitely
+        int i=0;
+        for(;;)                    
+        {
+          std::string body="event: foo\r\n"
+                           "data: halo "+std::to_string(i++)+"\r\n"
+                           "\r\n";
+          async_send(stream,  asio::buffer(body.data(), body.length())).get();
+          asyik::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
+    as->run();
+}
+```
+
+When we test the SSE endpoint, the request and event stream responses will have something like:
+```
+[request]
+GET /sse HTTP/1.1
+Host: localhost
+Accept: text/event-stream
+
+[responses]
+HTTP/1.1 200 OK
+Connection: keep-alive
+Content-type: text/event-stream
+
+retry: 5000
+
+event: foo
+data: halo 0
+
+event: foo
+data: halo 1
+
+event: foo
+data: halo 2
+
+[repeat indefinitely each 1 secs...]
+```

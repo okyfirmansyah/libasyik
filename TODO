@@ -4,7 +4,6 @@ GENERAL/Service:
 
 HTTP:
 -delete SSL verify_none
--Dokumentasi SSL server
 -Support SSL client custom context(for e.g custom certificate, paths, callbacks)
 -SSL detailed error response
 -http test network negative case(host not found, dns not found, no connection, timeouts)

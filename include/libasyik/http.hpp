@@ -2,6 +2,7 @@
 #define LIBASYIK_ASYIK_HTTP_HPP
 #include <string>
 #include <regex>
+#include <any>
 #include "boost/fiber/all.hpp"
 #include "aixlog.hpp"
 #include "boost/asio.hpp"
@@ -112,6 +113,7 @@ namespace asyik
     };
 
   public:
+    using stream_type = StreamType;
     ~http_server(){};
     http_server &operator=(const http_server &) = delete;
     http_server() = delete;
@@ -152,6 +154,17 @@ namespace asyik
     void on_websocket_regex(R &&r, T &&cb)
     {
       ws_routes.push_back({"", std::forward<R>(r), std::forward<T>(cb)});
+    }
+
+    template<typename Req>
+    http_connection_ptr<stream_type> get_request_connection(const Req&req)
+    {
+      auto p=std::any_cast<http_connection_wptr<stream_type>>(req.connection_wptr);
+      if(auto connection=p.lock())
+      {
+        return connection;
+      }
+      return nullptr;
     }
 
   private:
@@ -294,11 +307,18 @@ namespace asyik
         : beast_request(),
           headers(beast_request.base()),
           body(beast_request.body()),
-          response(){};
+          response(),
+          manual_response(false){};
 
     http_beast_request beast_request;
     http_request_headers &headers;
     http_request_body &body;
+
+    template <typename S>
+    inline auto get_connection_handle(S server)
+    {
+      return server->get_request_connection(*this);
+    }
 
     string_view target() const
     {
@@ -338,8 +358,18 @@ namespace asyik
       };
     } response;
 
+    void activate_direct_response_handling()
+    {
+      manual_response = true;
+    }
+
   private:
     boost::beast::flat_buffer buffer;
+    bool manual_response;
+    std::any connection_wptr;
+
+    template <typename StreamType>
+    friend class http_server;
 
     template <typename StreamType>
     friend class http_connection;
@@ -576,6 +606,7 @@ namespace asyik
 
             auto asyik_req = std::make_shared<http_request>();
             auto &req = asyik_req->beast_request;
+            asyik_req->connection_wptr=http_connection_wptr<StreamType>(p);
             while (1)
             {
               asyik::internal::http::async_read(p->get_stream(), asyik_req->buffer, req).get();
@@ -670,6 +701,9 @@ namespace asyik
                   asyik_req->response.result(500);
                   asyik_req->response.beast_response.keep_alive(false);
                 };
+
+                if (asyik_req->manual_response)
+                  break;
 
                 asyik_req->response.beast_response.prepare_payload();
                 http::serializer<false, http::string_body> sr{res};

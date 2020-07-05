@@ -355,6 +355,7 @@ namespace asyik
     server->on_http_request("/post-only/<int>/name/<string>", "POST", [](auto req, auto args) {
       req->response.headers.set("x-test-reply", "amiiin");
       req->response.headers.set("content-type", "text/json");
+
       std::string x_test{req->headers["x-test"]};
       req->response.body = req->body + "-" + args[1] + "-" + args[2] + "-" + x_test;
       req->response.result(200);
@@ -380,6 +381,96 @@ namespace asyik
       REQUIRE(!s.compare("halo"));
 
       ws->close(websocket_close_code::normal, "closed normally");
+
+      as->stop();
+    });
+
+    as->run();
+  }
+
+  template <typename Conn, typename... Args>
+  auto async_send(Conn &con, Args &&... args)
+  {
+    boost::fibers::promise<std::size_t> promise;
+    auto future = promise.get_future();
+
+    con.async_write_some(
+      std::forward<Args>(args)...,
+      [prom = std::move(promise)](const boost::system::error_code &ec,
+                                  std::size_t size) mutable {
+        if (!ec)
+          prom.set_value(size);
+        else
+          prom.set_exception(
+            std::make_exception_ptr(std::runtime_error("send error")));
+      });
+    return std::move(future);
+  }
+
+  TEST_CASE("test manual handling of http requests", "[http]")
+  {
+    auto as = asyik::make_service();
+
+    // The SSL context is required, and holds certificates
+    ssl::context ctx{ssl::context::tlsv12};
+
+    // This holds the self-signed certificate used by the server
+    load_server_certificate(ctx);
+
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
+    auto server2 = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4005);
+
+    server->on_http_request("/manual", "GET", [server](auto req, auto args) {
+      auto connection = req->get_connection_handle(server);
+      auto &stream = connection->get_stream();
+      req->activate_direct_response_handling();
+
+      std::string body{req->headers["x-test"]};
+      std::string s= "HTTP/1.1 200 OK\r\n"
+                     "Content-type: text/plain\r\n"
+                     "X-Test-Reply: amiiin\r\n"
+                     "Content-length: "+std::to_string(body.length())+"\r\n\r\n";
+                    
+      async_send(stream,  asio::buffer(s.data(), s.length())).get();
+      async_send(stream,  asio::buffer(body.data(), body.length())).get();
+    });
+
+    server2->on_http_request("/manual", "GET", [server2](auto req, auto args) {
+      auto connection = req->get_connection_handle(server2);
+      auto &stream = connection->get_stream();
+      req->activate_direct_response_handling();
+
+      std::string body{req->headers["x-test"]};
+      std::string s= "HTTP/1.1 200 OK\r\n"
+                     "Content-type: text/plain\r\n"
+                     "X-Test-Reply: amiiin\r\n"
+                     "Content-length: "+std::to_string(body.length())+"\r\n\r\n";
+                    
+      async_send(stream,  asio::buffer(s.data(), s.length())).get();
+      async_send(stream,  asio::buffer(body.data(), body.length())).get();
+    });
+
+    asyik::sleep_for(std::chrono::milliseconds(100));
+    as->execute([as]() {
+      {
+      auto req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/manual", "", {{"x-test", "ok"}});
+
+      REQUIRE(req->response.result() == 200);
+      std::string x_test_reply{req->response.headers["x-test-reply"]};
+      std::string body = req->response.body;
+      REQUIRE(!body.compare("ok"));
+      REQUIRE(!x_test_reply.compare("amiiin"));
+      }
+
+      {
+      auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
+
+      REQUIRE(req->response.result() == 200);
+      std::string x_test_reply{req->response.headers["x-test-reply"]};
+      std::string body = req->response.body;
+      REQUIRE(!body.compare("ok"));
+      REQUIRE(!x_test_reply.compare("amiiin"));
+      }
 
       as->stop();
     });
