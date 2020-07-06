@@ -1,6 +1,6 @@
-To manage concurrent network connection processes, Libasyik using user-land threading system based on [Boost::Fiber](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html). 
+To manage concurrent network connection processes, Libasyik user user-land threading system based on [Boost::Fiber](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html). 
 
-Because of its lightweight nature, it is possible to create fibers cheaply while executing network programming in synchronous-like fashion:
+Because of its lightweight nature, it's possible to create fibers cheaply while executing network programming in synchronous-like fashion:
 ```c++
 #include "libasyik/service.hpp"
 #include "libasyik/http.hpp"
