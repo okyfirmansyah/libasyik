@@ -29,12 +29,12 @@ install(
 )
 
 install(
-    DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+    DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
 
 install(
-    DIRECTORY ${CMAKE_SOURCE_DIR}/external/aixlog/include/
+    DIRECTORY ${PROJECT_SOURCE_DIR}/external/aixlog/include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
 )
 
