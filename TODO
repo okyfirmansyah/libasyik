@@ -1,5 +1,4 @@
 GENERAL/Service:
--rapihin exceptions(boost exception)
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
 
 HTTP:

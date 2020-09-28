@@ -207,7 +207,7 @@ auto async_send(Conn &con, Args &&... args)
           prom.set_value(size);
         else
           prom.set_exception(
-            std::make_exception_ptr(std::runtime_error("send error")));
+            std::make_exception_ptr(asyik::network_error("send error")));
       });
     return std::move(future);
 }

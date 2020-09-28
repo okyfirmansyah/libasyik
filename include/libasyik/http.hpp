@@ -13,6 +13,7 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include "service.hpp"
+#include "error.hpp"
 #include "boost/algorithm/string/predicate.hpp"
 #include "internal/asio_internal.hpp"
 
@@ -198,7 +199,7 @@ namespace asyik
       if (it != routeList.end())
         return *it;
       else
-        throw std::make_exception_ptr(std::runtime_error("route not found"));
+        throw not_found_error("route not found");
     }
 
     template <typename ReqType>
@@ -617,12 +618,12 @@ namespace asyik
                 // Clients SHOULD NOT begin sending WebSocket
                 // frames until the server has provided a response.
                 if (asyik_req->buffer.size() != 0)
-                  throw std::make_exception_ptr(std::runtime_error("unexpected data before websocket handshake!"));
+                  throw unexpected_input_error("unexpected data before websocket handshake!");
 
                 try
                 {
                   if (p->http_server.expired())
-                    throw std::make_exception_ptr(std::runtime_error("server expired"));
+                    throw network_expired_error("server expired");
 
                   auto server = p->http_server.lock();
 
@@ -631,7 +632,7 @@ namespace asyik
 
                   // Construct the str ;o,\eam, transferring ownership of the socket
                   if (server->service.expired())
-                    throw std::make_exception_ptr(std::runtime_error("service expired"));
+                    throw network_expired_error("service expired");
 
                   auto service = server->service.lock();
 
@@ -673,25 +674,20 @@ namespace asyik
                 try
                 {
                   if (p->http_server.expired())
-                    throw std::make_exception_ptr(std::runtime_error("server expired"));
+                    throw network_expired_error("server expired");
                   auto server = p->http_server.lock();
 
-                  bool found = false;
                   try
                   {
                     http_route_args args;
                     const http_route_tuple &route = server->find_http_route(req, args);
-                    found = true;
 
                     std::get<2>(route)(asyik_req, args);
                   }
-                  catch (...)
+                  catch (not_found_error &e)
                   {
                     asyik_req->response.body = "";
-                    if (!found)
-                      asyik_req->response.result(404);
-                    else
-                      asyik_req->response.result(500);
+                    asyik_req->response.result(404);
                     asyik_req->response.beast_response.keep_alive(false);
                   }
                 }
@@ -731,7 +727,7 @@ namespace asyik
     acceptor = std::make_shared<ip::tcp::acceptor>(as->get_io_service(),
                                                    ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port), true);
     if (!acceptor)
-      throw std::runtime_error("could not allocate TCP acceptor");
+      throw resource_error("could not allocate TCP acceptor");
   }
 
   template <typename StreamType>

@@ -7,6 +7,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/fiber/all.hpp>
+#include "libasyik/error.hpp"
 
 namespace asio = boost::asio;
 namespace fibers = boost::fibers;
@@ -35,7 +36,7 @@ namespace asyik
                             prom.set_value(sz);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("read_error")));
                     });
                 return std::move(future);
             };
@@ -53,7 +54,7 @@ namespace asyik
                             prom.set_value(sz);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("write_error")));
+                                std::make_exception_ptr(network_error("write_error")));
                     });
                 return std::move(future);
             };
@@ -73,7 +74,7 @@ namespace asyik
                         }
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("read_error")));
                     });
                 return std::move(future);
             };
@@ -106,7 +107,7 @@ namespace asyik
                             prom.set_value(res);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("resolve error")));
                     });
                 return std::move(future);
             };
@@ -125,7 +126,7 @@ namespace asyik
                             prom.set_value(res);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("connect error")));
                     });
                 return std::move(future);
             }
@@ -146,7 +147,7 @@ namespace asyik
                             prom.set_value(sz);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("write_error")));
+                                std::make_exception_ptr(network_error("read error")));
                     });
                 return std::move(future);
             };
@@ -164,7 +165,7 @@ namespace asyik
                             prom.set_value(sz);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("write_error")));
+                                std::make_exception_ptr(network_error("write_error")));
                     });
                 return std::move(future);
             };
@@ -184,7 +185,7 @@ namespace asyik
                                             prom.set_value();
                                         else
                                             prom.set_exception(std::make_exception_ptr(
-                                                std::runtime_error("read_error")));
+                                                network_error("handshake error")));
                                     });
 
                 return std::move(future);
@@ -202,7 +203,7 @@ namespace asyik
                                            prom.set_value();
                                        else
                                            prom.set_exception(std::make_exception_ptr(
-                                               std::runtime_error("read_error")));
+                                               network_error("shutdown error")));
                                    });
 
                 return std::move(future);
@@ -224,7 +225,7 @@ namespace asyik
                                        prom.set_value(bytes_transferred);
                                    else
                                        prom.set_exception(std::make_exception_ptr(
-                                           std::runtime_error("read_error")));
+                                           network_error("read_error")));
                                });
                 return std::move(future);
             }
@@ -243,7 +244,7 @@ namespace asyik
                             prom.set_value(bytes_transferred);
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("read_error")));
                     });
                 return std::move(future);
             }
@@ -261,7 +262,7 @@ namespace asyik
                                         prom.set_value(bytes_transferred);
                                     else
                                         prom.set_exception(std::make_exception_ptr(
-                                            std::runtime_error("read_error")));
+                                            network_error("write error")));
                                 });
                 return std::move(future);
             }
@@ -279,7 +280,7 @@ namespace asyik
                             prom.set_value();
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("accept error")));
                     });
 
                 return std::move(future);
@@ -298,7 +299,7 @@ namespace asyik
                             prom.set_value();
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("handshake error")));
                     });
 
                 return std::move(future);
@@ -317,7 +318,7 @@ namespace asyik
                             prom.set_value();
                         else
                             prom.set_exception(
-                                std::make_exception_ptr(std::runtime_error("read_error")));
+                                std::make_exception_ptr(network_error("close error")));
                     });
 
                 return std::move(future);
