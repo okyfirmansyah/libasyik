@@ -65,18 +65,26 @@ namespace asyik
 
     service(struct private_ &&);
 
-    template <typename T, typename... V>
-    void execute(T &&t, V &&... v)
+    template <typename F, typename... Args>
+    fibers::future<typename std::result_of<F(Args...)>::type> execute(F &&fun, Args &&... args)
     {
-      fiber fb([t2 = std::forward<T>(t)](V &&... v) { t2(v...); });
-      fb.detach();
-    }
+      auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
+      auto future = p->get_future();
+      strand.post([fun2 = std::forward<F>(fun), &args..., p]()mutable {
+        fiber fb([fun3 = std::forward<F>(fun2), p](Args &&... args) {
+          try
+          {
+            service_internal::helper<typename std::result_of<F(Args...)>::type>::set(p, fun3, std::forward<Args>(args)...);
+          }
+          catch (...)
+          {
+            p->set_exception(std::current_exception());
+          }
+        });
+        fb.detach();
+      });
 
-    template <typename T, typename... V>
-    fiber spawn(T &&t, V &&... v)
-    {
-      fiber fb([t2 = std::forward<T>(t)](V &&... v) { t2(v...); });
-      return std::move(fb);
+      return std::move(future);
     }
 
     template <typename F, typename... Args>
@@ -108,15 +116,20 @@ namespace asyik
     {
       if (workers_initiated)
       {
-        tasks->close();
-        tasks = nullptr; // will close channel
-        std::for_each(workers.begin(), workers.end(), [](auto &t) {
-          t.join();
+        //!! this pass by reference solution could be better
+        execute([t=&tasks, w=&workers]() {
+          (*t)->close();
+          t->reset();
+          std::for_each(w->begin(), w->end(), [](auto &t) {
+            t.join();
+          });
         });
       };
-      io_service.stop();
-      workers_initiated = false;
-      stopped = true;
+      execute([i=&io_service, w=&workers_initiated, s=&stopped]() {
+        i->stop();
+        *w = false;
+        *s = true;
+      });
     };
 
     boost::asio::io_context &get_io_service() { return io_service; };
@@ -127,8 +140,9 @@ namespace asyik
   private:
     bool stopped;
     boost::asio::io_context io_service;
+    boost::asio::io_context::strand strand;
     void init_workers();
-    bool workers_initiated;
+    std::atomic<bool> workers_initiated;
     std::vector<std::thread> workers;
     std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
 

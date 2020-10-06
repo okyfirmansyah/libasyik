@@ -1,4 +1,5 @@
 GENERAL/Service:
+-Make execute able to return future value (like async)
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
 
 HTTP:

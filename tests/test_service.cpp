@@ -19,7 +19,7 @@ namespace asyik{
     REQUIRE(true);
   }
 
-  TEST_CASE("Check spawn() and execute()", "[service]")
+  TEST_CASE("Check execute()", "[service]")
   {
     auto as = asyik::make_service();
     std::string sequence;
@@ -30,14 +30,30 @@ namespace asyik{
       asyik::sleep_for(std::chrono::milliseconds(20));
       sequence += "A";
     });
-    auto fb = as->spawn([&] {
+    as->execute([as, &sequence] {
       asyik::sleep_for(std::chrono::milliseconds(20));
       sequence += "B";
       asyik::sleep_for(std::chrono::milliseconds(20));
       sequence += "B";
+      as->stop();
     });
-    fb.join();
+    as->run();
     REQUIRE(!sequence.compare("AABAB"));
+  }
+
+  TEST_CASE("Test return value from async", "[service]")
+  {
+    auto as = asyik::make_service();
+
+    as->async([as](){
+      std::string test=as->execute([]()->std::string{
+        return "hehe";
+      }).get();
+      REQUIRE(!test.compare("hehe"));
+      as->stop();
+    });
+
+    as->run();
   }
 
   TEST_CASE("execute async", "[service]")
@@ -85,6 +101,18 @@ namespace asyik{
     REQUIRE(!s.compare("10"));
 
     as->stop();
+    as->run();
+  }
+
+  TEST_CASE("stop service from another thread/async", "[service]")
+  {
+    auto as = asyik::make_service();
+
+    as->async([as](){
+      asyik::sleep_for(std::chrono::milliseconds(300));
+      as->stop();
+    });
+
     as->run();
   }
 }

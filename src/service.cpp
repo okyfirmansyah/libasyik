@@ -16,7 +16,7 @@ namespace asyik
 {
   std::chrono::time_point<std::chrono::high_resolution_clock> service::start; //!!!
 
-  service::service(struct service::private_ &&) : stopped(false), io_service()
+  service::service(struct service::private_ &&) : stopped(false), io_service(), strand(io_service)
   {
     AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::trace,
                                         AixLog::Type::normal);
