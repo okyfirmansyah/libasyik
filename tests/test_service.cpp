@@ -1,17 +1,18 @@
 
 #include "catch2/catch.hpp"
 #include "libasyik/service.hpp"
+#include "libasyik/error.hpp"
 
-namespace asyik{
+namespace asyik
+{
   void _TEST_invoke_service(){};
 
-  
   TEST_CASE("very basic fiber execution", "[service]")
   {
     auto as = asyik::make_service();
 
     as->execute([=] {
-      LOG(INFO) << "brief fiber";
+      LOG(INFO) << "brief fiber\n";
       asyik::sleep_for(std::chrono::milliseconds(1));
       as->stop();
     });
@@ -41,14 +42,72 @@ namespace asyik{
     REQUIRE(!sequence.compare("AABAB"));
   }
 
-  TEST_CASE("Test return value from async", "[service]")
+  TEST_CASE("Check return value from execute()", "[service]")
+  {
+    auto as = asyik::make_service();
+    as->execute([&]() {
+      std::string sequence =
+          as->execute([&]() -> std::string {
+              return "hehehe";
+            }).get();
+      REQUIRE(!sequence.compare("hehehe"));
+
+      // return exception
+      try
+      {
+        int never =
+            as->execute([&]() -> int {
+                throw asyik::already_expired_error("expected");
+              }).get();
+        REQUIRE(0);
+      }
+      catch (asyik::already_expired_error &e)
+      {
+        LOG(INFO) << "exception correctly received\n";
+      };
+      as->stop();
+    });
+
+    as->run();
+  }
+
+  TEST_CASE("Check return value from async()", "[service]")
+  {
+    auto as = asyik::make_service();
+    as->execute([&]() {
+      std::string sequence =
+          as->async([]() -> std::string {
+              return "hehehe";
+            }).get();
+      REQUIRE(!sequence.compare("hehehe"));
+
+      // return exception
+      try
+      {
+        int never =
+            as->async([]() -> int {
+                throw asyik::already_expired_error("expected");
+              }).get();
+        REQUIRE(0);
+      }
+      catch (asyik::already_expired_error &e)
+      {
+        LOG(INFO) << "exception correctly received\n";
+      };
+      as->stop();
+    });
+
+    as->run();
+  }
+
+  TEST_CASE("Test return value execute from async", "[service]")
   {
     auto as = asyik::make_service();
 
-    as->async([as](){
-      std::string test=as->execute([]()->std::string{
-        return "hehe";
-      }).get();
+    as->async([as]() {
+      std::string test = as->execute([]() -> std::string {
+                             return "hehe";
+                           }).get();
       REQUIRE(!test.compare("hehe"));
       as->stop();
     });
@@ -108,11 +167,11 @@ namespace asyik{
   {
     auto as = asyik::make_service();
 
-    as->async([as](){
+    as->async([as]() {
       asyik::sleep_for(std::chrono::milliseconds(300));
       as->stop();
     });
 
     as->run();
   }
-}
+} // namespace asyik

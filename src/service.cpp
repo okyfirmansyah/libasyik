@@ -46,7 +46,7 @@ namespace asyik
       }
       else
         idle_threshold = 10000;
-      if(!stopped)
+      if (!stopped)
         io_service.restart();
     }
     for (int i = 0; i < 10000; i++)
@@ -59,14 +59,15 @@ namespace asyik
   void service::init_workers()
   {
     int pool_size = std::thread::hardware_concurrency();
-    tasks = std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024);
+    std::atomic_store(&tasks, std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
     workers_initiated = true;
 
     for (std::size_t i = 0; i < (size_t)pool_size; ++i)
     {
       workers.emplace_back([p = shared_from_this()]() {
         std::function<void()> tsk;
-        while (boost::fibers::channel_op_status::closed != p->tasks->pop(tsk))
+        auto tasks = std::atomic_load(&p->tasks);
+        while (boost::fibers::channel_op_status::closed != tasks->pop(tsk))
         {
           tsk();
         };

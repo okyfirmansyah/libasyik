@@ -95,7 +95,8 @@ namespace asyik
 
       auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
       auto future = p->get_future();
-      tasks->push([f = std::forward<F>(fun),
+      auto t = std::atomic_load(&tasks);
+      t->push([f = std::forward<F>(fun),
                    &args...,
                    p]() mutable {
         try
