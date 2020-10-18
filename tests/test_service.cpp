@@ -174,4 +174,46 @@ namespace asyik
 
     as->run();
   }
+
+  TEST_CASE("test proper cleanup of function object in execute()", "[service]")
+  {
+    auto as = asyik::make_service();
+    auto i_ptr = std::make_shared<int>(1);
+    std::weak_ptr<int> i_wptr = i_ptr;
+    REQUIRE(!i_wptr.expired());
+
+    as->execute([i_ptr](){
+      asyik::sleep_for(std::chrono::milliseconds(10));
+    });
+
+    as->execute([i_wptr, as](){
+      asyik::sleep_for(std::chrono::milliseconds(50));
+      REQUIRE(i_wptr.expired());
+      as->stop();
+    });
+
+    i_ptr.reset();
+    as->run();
+  }
+
+  TEST_CASE("test proper cleanup of function object in async()", "[service]")
+  {
+    auto as = asyik::make_service();
+    auto i_ptr = std::make_shared<int>(1);
+    std::weak_ptr<int> i_wptr = i_ptr;
+    REQUIRE(!i_wptr.expired());
+
+    as->async([i_ptr](){
+      asyik::sleep_for(std::chrono::milliseconds(10));
+    });
+
+    as->execute([i_wptr, as](){
+      asyik::sleep_for(std::chrono::milliseconds(50));
+      REQUIRE(i_wptr.expired());
+      as->stop();
+    });
+
+    i_ptr.reset();
+    as->run();
+  }
 } // namespace asyik

@@ -70,6 +70,7 @@ namespace asyik
         while (boost::fibers::channel_op_status::closed != tasks->pop(tsk))
         {
           tsk();
+          tsk=[](){};// release function object
         };
       });
     };

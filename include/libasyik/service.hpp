@@ -21,7 +21,7 @@ namespace asyik
     struct helper
     {
       template <typename P, typename F, typename... Args>
-      static void set(P &&p, F &&f, Args &&... args)
+      static void set(P &p, F &f, Args &&... args)
       {
         p->set_value(f(std::forward<Args>(args)...));
       }
@@ -31,7 +31,7 @@ namespace asyik
     struct helper<void>
     {
       template <typename P, typename F, typename... Args>
-      static void set(P &&p, F &&f, Args &&... args)
+      static void set(P &p, F &f, Args &&... args)
       {
         f(std::forward<Args>(args)...);
         p->set_value();
