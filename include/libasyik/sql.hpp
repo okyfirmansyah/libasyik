@@ -2,6 +2,7 @@
 #define LIBASYIK_ASYIK_SQL_HPP
 #include <string>
 #include <regex>
+#include <list>
 #include "boost/fiber/all.hpp"
 #include "aixlog.hpp"
 #include "service.hpp"
@@ -48,12 +49,14 @@ namespace asyik
         sql_pool(sql_pool &&) = default;
         sql_pool &operator=(sql_pool &&) = default;
 
-        sql_pool(struct private_){};
+        sql_pool(struct private_) : health_check_period(60){};
         sql_session_ptr get_session(service_ptr as);
+        void set_health_check_period(int sec) { health_check_period = sec; }
 
     private:
         fibers::mutex mtx_;
-        std::vector<std::unique_ptr<soci::session>> soci_sessions;
+        std::list<std::unique_ptr<soci::session>> soci_sessions;
+        std::atomic<int> health_check_period;
 
         friend class sql_session;
         template <typename F, typename C>
@@ -71,6 +74,55 @@ namespace asyik
             auto s = std::make_unique<soci::session>(std::forward<F>(factory), std::forward<C>(connectString));
             p->soci_sessions.push_back(std::move(s));
         };
+
+        std::thread th([w = sql_pool_wptr(p),
+                        f = std::forward<F>(factory),
+                        connectString = std::string{connectString}]() {
+            while (true)
+            {
+                sql_pool_ptr p;
+                sleep_for(std::chrono::seconds(1));
+                if ((p = w.lock()))
+                {
+                    // test every soci_session here
+                    std::unique_lock<fibers::mutex> l(p->mtx_);
+                    auto sessions = std::move(p->soci_sessions);
+                    p->soci_sessions.resize(0);
+                    while (sessions.size())
+                    {
+                        auto sql = std::move(sessions.front());
+                        sessions.pop_front();
+                        l.unlock();
+                        try
+                        {
+                            *sql << "SELECT 1;";
+                            l.lock();
+                            p->soci_sessions.push_back(std::move(sql));
+                        }
+                        catch (std::exception &e)
+                        {
+                            try
+                            {
+                                LOG(WARNING) << "health check failed: " << e.what() << "\nrenew SOCI session...\n";
+                                auto s = std::make_unique<soci::session>(std::forward<F>(f), connectString);
+                                l.lock();
+                                p->soci_sessions.push_back(std::move(s));
+                            }
+                            catch (std::exception &e)
+                            {
+                                LOG(WARNING) << "renew SOCI session failed: " << e.what() << "\n";
+                                l.lock();
+                                p->soci_sessions.push_back(std::move(sql));
+                            }
+                        }
+                    }
+                    p.reset();
+                }
+                else
+                    break;
+            }
+        });
+        th.detach();
 
         return p;
     }
@@ -137,27 +189,27 @@ namespace asyik
         sql_transaction &operator=(sql_transaction &&) = default;
 
         sql_transaction(sql_session_ptr ses)
-        :session(ses), handled(false)
+            : session(ses), handled(false)
         {
             session->begin();
         };
 
         void begin()
         {
-            handled=false;
+            handled = false;
             session->begin();
         }
 
         void commit()
         {
             session->commit();
-            handled=true;
+            handled = true;
         }
 
         void rollback()
         {
             session->rollback();
-            handled=true;
+            handled = true;
         }
 
     private:

@@ -3,7 +3,8 @@
 #include "libasyik/http.hpp"
 #include "libasyik/sql.hpp"
 
-namespace asyik {
+namespace asyik
+{
   void _TEST_invoke_sql(){};
 
   TEST_CASE("Test case to connect to the test DB")
@@ -13,6 +14,7 @@ namespace asyik {
 
     // run the pgsql for testing:  docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine
     auto pool = make_sql_pool(asyik::sql_backend_postgresql, "host=localhost dbname=postgres password=test user=postgres", 4);
+    pool->set_health_check_period(1);
 
     {
       auto ses = pool->get_session(as);
@@ -157,4 +159,4 @@ namespace asyik {
     });
     as->run();
   }
-}
+} // namespace asyik

@@ -23,8 +23,8 @@ namespace asyik
         asyik::sleep_for(std::chrono::milliseconds(5));
         mtx_.lock();
       }
-      session->soci_session = std::move(soci_sessions.back());
-      soci_sessions.pop_back();
+      session->soci_session = std::move(soci_sessions.front());
+      soci_sessions.pop_front();
     }
     session->pool = shared_from_this();
     session->service = as;
