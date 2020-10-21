@@ -78,41 +78,46 @@ namespace asyik
         std::thread th([w = sql_pool_wptr(p),
                         f = std::forward<F>(factory),
                         connectString = std::string{connectString}]() {
+            int i = 0;
             while (true)
             {
                 sql_pool_ptr p;
                 sleep_for(std::chrono::seconds(1));
                 if ((p = w.lock()))
                 {
-                    // test every soci_session here
-                    std::unique_lock<fibers::mutex> l(p->mtx_);
-                    auto sessions = std::move(p->soci_sessions);
-                    p->soci_sessions.resize(0);
-                    while (sessions.size())
+                    if (++i >= p->health_check_period)
                     {
-                        auto sql = std::move(sessions.front());
-                        sessions.pop_front();
-                        l.unlock();
-                        try
+                        i = 0;
+                        // test every soci_session here
+                        std::unique_lock<fibers::mutex> l(p->mtx_);
+                        auto sessions = std::move(p->soci_sessions);
+                        p->soci_sessions.resize(0);
+                        while (sessions.size())
                         {
-                            *sql << "SELECT 1;";
-                            l.lock();
-                            p->soci_sessions.push_back(std::move(sql));
-                        }
-                        catch (std::exception &e)
-                        {
+                            auto sql = std::move(sessions.front());
+                            sessions.pop_front();
+                            l.unlock();
                             try
                             {
-                                LOG(WARNING) << "health check failed: " << e.what() << "\nrenew SOCI session...\n";
-                                auto s = std::make_unique<soci::session>(std::forward<F>(f), connectString);
+                                *sql << "SELECT 1;";
                                 l.lock();
-                                p->soci_sessions.push_back(std::move(s));
+                                p->soci_sessions.push_back(std::move(sql));
                             }
                             catch (std::exception &e)
                             {
-                                LOG(WARNING) << "renew SOCI session failed: " << e.what() << "\n";
-                                l.lock();
-                                p->soci_sessions.push_back(std::move(sql));
+                                try
+                                {
+                                    LOG(WARNING) << "health check failed: " << e.what() << "\nrenew SOCI session...\n";
+                                    auto s = std::make_unique<soci::session>(std::forward<F>(f), connectString);
+                                    l.lock();
+                                    p->soci_sessions.push_back(std::move(s));
+                                }
+                                catch (std::exception &e)
+                                {
+                                    LOG(WARNING) << "renew SOCI session failed: " << e.what() << "\n";
+                                    l.lock();
+                                    p->soci_sessions.push_back(std::move(sql));
+                                }
                             }
                         }
                     }
