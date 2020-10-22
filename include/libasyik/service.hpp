@@ -70,7 +70,7 @@ namespace asyik
     {
       auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
       auto future = p->get_future();
-      strand.post([fun2 = std::forward<F>(fun), &args..., p]()mutable {
+      strand.post([fun2 = std::forward<F>(fun), &args..., p]() mutable {
         fiber fb([fun3 = std::forward<F>(fun2), p](Args &&... args) {
           try
           {
@@ -90,15 +90,15 @@ namespace asyik
     template <typename F, typename... Args>
     fibers::future<typename std::result_of<F(Args...)>::type> async(F &&fun, Args &&... args)
     {
-      if (!workers_initiated)
+      if (!is_workers_initiated())
         init_workers();
 
       auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
       auto future = p->get_future();
       auto t = std::atomic_load(&tasks);
       t->push([f = std::forward<F>(fun),
-                   &args...,
-                   p]() mutable {
+               &args...,
+               p]() mutable {
         try
         {
           service_internal::helper<typename std::result_of<F(Args...)>::type>::set(p, f, std::forward<Args>(args)...);
@@ -115,20 +115,8 @@ namespace asyik
     void run();
     void stop()
     {
-      if (workers_initiated)
-      {
-        //!! this pass by reference solution could be better
-        execute([t=&tasks, w=&workers]() {
-          (*t)->close();
-          t->reset();
-          std::for_each(w->begin(), w->end(), [](auto &t) {
-            t.join();
-          });
-        });
-      };
-      execute([i=&io_service, w=&workers_initiated, s=&stopped]() {
+      execute([i = &io_service, s = &stopped]() {
         i->stop();
-        *w = false;
         *s = true;
       });
     };
@@ -136,16 +124,23 @@ namespace asyik
     boost::asio::io_context &get_io_service() { return io_service; };
     static void terminate();
 
-    static std::chrono::time_point<std::chrono::high_resolution_clock> start;//!!!
+    static std::chrono::time_point<std::chrono::high_resolution_clock> start; //!!!
 
   private:
+    static bool is_workers_initiated(bool initiated = false)
+    {
+      static std::atomic<bool> workers_initiated(false);
+      if (initiated)
+        workers_initiated = true;
+      return workers_initiated;
+    }
+
     bool stopped;
     boost::asio::io_context io_service;
     boost::asio::io_context::strand strand;
-    void init_workers();
-    std::atomic<bool> workers_initiated;
-    std::vector<std::thread> workers;
-    std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
+    static void init_workers();
+
+    static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
 
   public:
     friend service_ptr make_service();

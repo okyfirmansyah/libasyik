@@ -16,13 +16,13 @@ namespace asyik
 {
   std::chrono::time_point<std::chrono::high_resolution_clock> service::start; //!!!
 
+  std::shared_ptr<fibers::buffered_channel<std::function<void()>>> service::tasks;
+
   service::service(struct service::private_ &&) : stopped(false), io_service(), strand(io_service)
   {
     AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::trace,
                                         AixLog::Type::normal);
     fibers::use_scheduling_algorithm<fibers::algo::round_robin>();
-
-    workers_initiated = false;
   }
 
   service_ptr make_service() { return std::make_shared<service>(service::private_{}); }
@@ -58,21 +58,31 @@ namespace asyik
 
   void service::init_workers()
   {
-    int pool_size = std::thread::hardware_concurrency();
+    int pool_size = std::thread::hardware_concurrency() * 4;
     std::atomic_store(&tasks, std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
-    workers_initiated = true;
+    is_workers_initiated(true);
 
     for (std::size_t i = 0; i < (size_t)pool_size; ++i)
     {
-      workers.emplace_back([p = shared_from_this()]() {
-        std::function<void()> tsk;
-        auto tasks = std::atomic_load(&p->tasks);
-        while (boost::fibers::channel_op_status::closed != tasks->pop(tsk))
-        {
-          tsk();
-          tsk=[](){};// release function object
-        };
+      std::thread th([]() {
+        auto as = asyik::make_service();
+
+        as->execute([as]() {
+          std::function<void()> tsk;
+          auto safe_tasks = std::atomic_load(&tasks);
+          while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk))
+          {
+            as->execute([tsk_in = std::move(tsk)]() {
+              tsk_in();
+            });
+          };
+
+          as->stop();
+        });
+
+        as->run();
       });
+      th.detach();
     };
   }
 } // namespace asyik

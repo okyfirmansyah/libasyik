@@ -182,11 +182,11 @@ namespace asyik
     std::weak_ptr<int> i_wptr = i_ptr;
     REQUIRE(!i_wptr.expired());
 
-    as->execute([i_ptr](){
+    as->execute([i_ptr]() {
       asyik::sleep_for(std::chrono::milliseconds(10));
     });
 
-    as->execute([i_wptr, as](){
+    as->execute([i_wptr, as]() {
       asyik::sleep_for(std::chrono::milliseconds(50));
       REQUIRE(i_wptr.expired());
       as->stop();
@@ -203,17 +203,87 @@ namespace asyik
     std::weak_ptr<int> i_wptr = i_ptr;
     REQUIRE(!i_wptr.expired());
 
-    as->async([i_ptr](){
+    as->async([i_ptr]() {
       asyik::sleep_for(std::chrono::milliseconds(10));
     });
 
-    as->execute([i_wptr, as](){
+    as->execute([i_wptr, as]() {
       asyik::sleep_for(std::chrono::milliseconds(50));
       REQUIRE(i_wptr.expired());
       as->stop();
     });
 
     i_ptr.reset();
+    as->run();
+  }
+
+  TEST_CASE("testing complex async and execute interaction", "[service]")
+  {
+    auto as = asyik::make_service();
+    int count = 0;
+
+    std::thread th([&count, as]() {
+      for (int i = 0; i < 500; i++)
+      {
+        as->execute([&count, as]() {
+          asyik::sleep_for(std::chrono::microseconds(10));
+          for (int j = 0; j < 10; j++)
+            as->async([&count, as]() {
+                for (int l = 0; l < 4; l++)
+                  as->execute([&count, as]() {
+                    asyik::sleep_for(std::chrono::microseconds(1));
+                    count++;
+                  });
+              }).get();
+          for (int k = 0; k < 100; k++)
+            as->execute([&count, as]() {
+              for (int m = 0; m < 3; m++)
+                as->async([&count, as]() {
+                  asyik::sleep_for(std::chrono::microseconds(1));
+                  as->execute([&count]() {
+                    count++;
+                  });
+                });
+            });
+        });
+      }
+    });
+    th.detach();
+
+    LOG(INFO) << "running complex async and execute..\n";
+    as->execute([&count, as]() {
+      while (count < 170000)
+        asyik::sleep_for(std::chrono::milliseconds(50));
+      LOG(INFO) << "complex async and execute loop finished!\n";
+      as->stop();
+    });
+
+    as->run();
+  }
+
+  TEST_CASE("testing highly parallel, fiber-i/o blocking async()", "[service]")
+  {
+    auto as = asyik::make_service();
+    int count = 0;
+
+    for (int i = 0; i < 1000; i++)
+    {
+      as->async([&count, as]() {
+        asyik::sleep_for(std::chrono::milliseconds(1500));
+        as->execute([&count, as]() {
+          count++;
+        });
+      });
+    }
+
+    LOG(INFO) << "waiting all async() to be finished..\n";
+    as->execute([&count, as]() {
+      while (count < 1000)
+        asyik::sleep_for(std::chrono::milliseconds(50));
+      LOG(INFO) << "all async() completed!\n";
+      as->stop();
+    });
+
     as->run();
   }
 } // namespace asyik
