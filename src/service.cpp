@@ -37,7 +37,7 @@ namespace asyik
         if (idle_threshold)
         {
           idle_threshold--;
-          asyik::sleep_for(std::chrono::microseconds(10));
+          asyik::sleep_for(std::chrono::microseconds(500));
         }
         else
         {
@@ -45,7 +45,7 @@ namespace asyik
         }
       }
       else
-        idle_threshold = 10000;
+        idle_threshold = 100;
       if (!stopped)
         io_service.restart();
     }
@@ -58,7 +58,7 @@ namespace asyik
 
   void service::init_workers()
   {
-    int pool_size = std::thread::hardware_concurrency() * 4;
+    int pool_size = std::thread::hardware_concurrency() * 2;
     std::atomic_store(&tasks, std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
     is_workers_initiated(true);
 
