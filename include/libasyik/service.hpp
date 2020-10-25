@@ -70,18 +70,18 @@ namespace asyik
     {
       auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
       auto future = p->get_future();
-      strand.post([fun2 = std::forward<F>(fun), &args..., p]() mutable {
-        fiber fb([fun3 = std::forward<F>(fun2), p](Args &&... args) {
-          try
-          {
-            service_internal::helper<typename std::result_of<F(Args...)>::type>::set(p, fun3, std::forward<Args>(args)...);
-          }
-          catch (...)
-          {
-            p->set_exception(std::current_exception());
-          }
-        });
-        fb.detach();
+      auto t = std::atomic_load(&execute_tasks);
+      t->push([f = std::forward<F>(fun),
+               &args...,
+               p]() mutable {
+        try
+        {
+          service_internal::helper<typename std::result_of<F(Args...)>::type>::set(p, f, std::forward<Args>(args)...);
+        }
+        catch (...)
+        {
+          p->set_exception(std::current_exception());
+        };
       });
 
       return std::move(future);
@@ -135,9 +135,10 @@ namespace asyik
       return workers_initiated;
     }
 
-    bool stopped;
+    std::atomic<bool> stopped;
     boost::asio::io_context io_service;
     boost::asio::io_context::strand strand;
+    std::shared_ptr<fibers::buffered_channel<std::function<void()>>> execute_tasks;
     static void init_workers();
 
     static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;

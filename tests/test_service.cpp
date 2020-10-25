@@ -7,6 +7,30 @@ namespace asyik
 {
   void _TEST_invoke_service(){};
 
+  TEST_CASE("basic execute and async latency checking", "service")
+  {
+    auto as = asyik::make_service();
+
+    as->execute([as]() {
+      asyik::sleep_for(std::chrono::milliseconds(500));
+      auto ts = std::chrono::high_resolution_clock::now();
+      as->execute([as, ts]() {
+        auto diff = std::chrono::high_resolution_clock::now() - ts;
+        REQUIRE(std::chrono::duration_cast<std::chrono::microseconds>(diff).count() < 20000);
+        LOG(INFO) << "duration execute(us)=" << std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(diff).count()) << "\n";
+      });
+      as->async([as, ts]() {
+        auto diff = std::chrono::high_resolution_clock::now() - ts;
+        REQUIRE(std::chrono::duration_cast<std::chrono::microseconds>(diff).count() < 20000);
+        LOG(INFO) << "duration async(us)=" << std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(diff).count()) << "\n";
+        asyik::sleep_for(std::chrono::milliseconds(500));
+        as->stop();
+      });
+    });
+
+    as->run();
+  }
+
   TEST_CASE("very basic fiber execution", "[service]")
   {
     auto as = asyik::make_service();

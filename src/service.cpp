@@ -18,7 +18,10 @@ namespace asyik
 
   std::shared_ptr<fibers::buffered_channel<std::function<void()>>> service::tasks;
 
-  service::service(struct service::private_ &&) : stopped(false), io_service(), strand(io_service)
+  service::service(struct service::private_ &&) : stopped(false),
+                                                  io_service(),
+                                                  strand(io_service),
+                                                  execute_tasks(std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024))
   {
     AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::trace,
                                         AixLog::Type::normal);
@@ -29,7 +32,18 @@ namespace asyik
 
   void service::run()
   {
-    int idle_threshold;
+    fiber fb([as = shared_from_this()]() {
+      std::function<void()> tsk;
+      while (!as->stopped && boost::fibers::channel_op_status::closed != as->execute_tasks->pop(tsk))
+      {
+        fiber fb([tsk_in = std::move(tsk)]() {
+          tsk_in();
+        });
+        fb.detach();
+      }
+    });
+
+    int idle_threshold = 30000;
     while (!stopped)
     {
       if (!io_service.poll())
@@ -37,23 +51,27 @@ namespace asyik
         if (idle_threshold)
         {
           idle_threshold--;
-          asyik::sleep_for(std::chrono::microseconds(500));
+          asyik::sleep_for(std::chrono::microseconds(10));
         }
         else
         {
-          asyik::sleep_for(std::chrono::microseconds(4000));
+          asyik::sleep_for(std::chrono::microseconds(1000));
         }
       }
       else
-        idle_threshold = 100;
+        idle_threshold = 30000;
       if (!stopped)
         io_service.restart();
     }
+
+    execute_tasks->close();
     for (int i = 0; i < 10000; i++)
     {
       io_service.poll();
       asyik::sleep_for(std::chrono::microseconds(10));
     }
+
+    fb.join();
   }
 
   void service::init_workers()
@@ -65,22 +83,16 @@ namespace asyik
     for (std::size_t i = 0; i < (size_t)pool_size; ++i)
     {
       std::thread th([]() {
-        auto as = asyik::make_service();
+        std::function<void()> tsk;
+        auto safe_tasks = std::atomic_load(&tasks);
+        while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk))
+        {
+          fiber fb([tsk_in = std::move(tsk)]() {
+            tsk_in();
+          });
 
-        as->execute([as]() {
-          std::function<void()> tsk;
-          auto safe_tasks = std::atomic_load(&tasks);
-          while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk))
-          {
-            as->execute([tsk_in = std::move(tsk)]() {
-              tsk_in();
-            });
-          };
-
-          as->stop();
-        });
-
-        as->run();
+          fb.detach();
+        };
       });
       th.detach();
     };
