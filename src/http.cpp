@@ -15,7 +15,7 @@ namespace fibers = boost::fibers;
 namespace beast = boost::beast;
 
 namespace asyik
-{  
+{
   std::string internal::route_spec_to_regex(string_view route_spc)
   {
     std::string regex_spec{route_spc};
@@ -32,17 +32,17 @@ namespace asyik
     std::regex int_tag{R"(<\s*int\s*>)"};
     regex_spec = std::regex_replace(regex_spec, int_tag, R"(([0-9]+))");
     std::regex string_tag{R"(<\s*string\s*>)"};
-    regex_spec = std::regex_replace(regex_spec, string_tag, R"(([^\/\s]+))");
+    regex_spec = std::regex_replace(regex_spec, string_tag, R"(([^\/\?\s]+))");
 
     // step 4: add ^...$ and optional trailing /
-    regex_spec = "^" + regex_spec + R"(\/?$)";
+    regex_spec = "^" + regex_spec + R"(\/?(|\?[^\?\s]*)$)";
 
     return regex_spec;
   }
 
   bool http_analyze_url(string_view url, http_url_scheme &scheme)
   {
-    static std::regex re(R"(^(http\:\/\/|https\:\/\/|ws\:\/\/|wss\:\/\/|)(([^\/\:]+)(:\d{1,5})|([^\/\:]+)())(\/[^\:]*|)$)",
+    static std::regex re(R"(^(http\:\/\/|https\:\/\/|ws\:\/\/|wss\:\/\/|)(([^\/\s\:]+)(:\d{1,5})|([^\/\s\:]+)())(\/[^\:\s]*|)$)",
                          std::regex_constants::icase);
     static std::regex re2(R"(^(https|wss)\:\/\/)", std::regex_constants::icase);
 
@@ -90,7 +90,7 @@ namespace asyik
     return p;
   }
 
-  http_server_ptr<https_stream_type> make_https_server(service_ptr as, ssl::context&& ssl, string_view addr, uint16_t port)
+  http_server_ptr<https_stream_type> make_https_server(service_ptr as, ssl::context &&ssl, string_view addr, uint16_t port)
   {
     auto p = std::make_shared<http_server<https_stream_type>>(http_server<https_stream_type>::private_{}, as, addr, port);
     p->ssl_context = std::make_shared<ssl::context>(std::move(ssl));
@@ -101,24 +101,24 @@ namespace asyik
 
   //http_connection_ptr make_http_connection(service_ptr as, string_view addr, string_view port)
   //{
-    // tcp::resolver resolver(as->get_io_service().get_executor());
+  // tcp::resolver resolver(as->get_io_service().get_executor());
 
-    // tcp::resolver::results_type results=internal::socket::async_resolve(resolver, addr, port).get();
+  // tcp::resolver::results_type results=internal::socket::async_resolve(resolver, addr, port).get();
 
-    // auto new_connection = std::make_shared<http_connection>
-    //                      (http_connection::private_{}, as->get_io_service().get_executor());
+  // auto new_connection = std::make_shared<http_connection>
+  //                      (http_connection::private_{}, as->get_io_service().get_executor());
 
-    // // Set the timeout for the operation
-    // new_connection->get_socket().expires_after(std::chrono::seconds(30));
+  // // Set the timeout for the operation
+  // new_connection->get_socket().expires_after(std::chrono::seconds(30));
 
-    // // Make the connection on the IP address we get from a lookup
-    // new_connection->get_socket().async_connect(
-    //         results,
-    //         [](const beast::error_code &ec,
-    //            tcp::resolver::results_type::endpoint_type ep)
-    //         {
+  // // Make the connection on the IP address we get from a lookup
+  // new_connection->get_socket().async_connect(
+  //         results,
+  //         [](const beast::error_code &ec,
+  //            tcp::resolver::results_type::endpoint_type ep)
+  //         {
 
-    //         });
+  //         });
 
   //  return nullptr;
   //}
