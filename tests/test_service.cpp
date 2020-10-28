@@ -22,6 +22,8 @@ namespace asyik
     auto as = asyik::make_service();
 
     as->execute([as]() {
+      as->async([]() {}).get(); // just to trigger threadpool creation
+
       asyik::sleep_for(std::chrono::milliseconds(500));
       auto ts = std::chrono::high_resolution_clock::now();
       as->execute([as, ts]() {
