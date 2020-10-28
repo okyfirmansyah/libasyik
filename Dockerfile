@@ -29,9 +29,9 @@ RUN apt-get -y update && \
     cmake .. -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql/libpq && \
     make -j6 && make install && \
     cd ~/temp && \
-    wget https://github.com/SOCI/soci/archive/release/4.0.zip && \
-    unzip 4.0.zip && \
-    cd soci-release-4.0 && \
+    wget https://github.com/SOCI/soci/archive/4.0.1.zip && \
+    unzip 4.0.1.zip && \
+    cd soci-4.0.1 && \
     mkdir build && cd build && \
     cmake .. -DWITH_BOOST=ON -DWITH_POSTGRESQL=ON -DWITH_SQLITE3=ON -DCMAKE_CXX_STANDARD=14 -DSOCI_CXX11=ON && \
     make -j6 && make install && \
