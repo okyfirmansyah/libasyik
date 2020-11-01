@@ -7,6 +7,16 @@ namespace asyik
 {
   void _TEST_invoke_service(){};
 
+  TEST_CASE("test log severity change")
+  {
+    auto as = asyik::make_service();
+    LOG(INFO) << "this certainly should be shown\n";
+    as->set_default_log_severity(log_severity::debug);
+    LOG(DEBUG) << "this also should be shown\n";
+    as->set_default_log_severity(log_severity::info);
+    LOG(DEBUG) << "this should not be shown!!!\n";
+  }
+
   TEST_CASE("basic execute and async latency checking", "service")
   {
     auto as = asyik::make_service();

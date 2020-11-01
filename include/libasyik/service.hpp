@@ -13,6 +13,8 @@ namespace asio = boost::asio;
 
 namespace asyik
 {
+  using log_severity = AixLog::Severity;
+
   void _TEST_invoke_service();
 
   namespace service_internal
@@ -87,6 +89,12 @@ namespace asyik
       return std::move(future);
     }
 
+    void set_default_log_severity(log_severity s)
+    {
+      BOOST_ASSERT(default_log_sink);
+      default_log_sink->filter = AixLog::Filter(s);
+    }
+
     template <typename F, typename... Args>
     fibers::future<typename std::result_of<F(Args...)>::type> async(F &&fun, Args &&... args)
     {
@@ -142,6 +150,7 @@ namespace asyik
     static void init_workers();
 
     static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
+    static std::shared_ptr<AixLog::Sink> default_log_sink;
 
   public:
     friend service_ptr make_service();

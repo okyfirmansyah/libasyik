@@ -17,14 +17,15 @@ namespace asyik
   std::chrono::time_point<std::chrono::high_resolution_clock> service::start; //!!!
 
   std::shared_ptr<fibers::buffered_channel<std::function<void()>>> service::tasks;
-
+  std::shared_ptr<AixLog::Sink> service::default_log_sink;
+  
   service::service(struct service::private_ &&) : stopped(false),
                                                   io_service(),
                                                   strand(io_service),
                                                   execute_tasks(std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024))
   {
-    AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::trace,
-                                        AixLog::Type::normal);
+    if (!default_log_sink)
+      default_log_sink = AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::info);
     fibers::use_scheduling_algorithm<fibers::algo::round_robin>();
   }
 
