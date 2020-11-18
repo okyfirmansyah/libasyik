@@ -9,14 +9,14 @@ HTTP:
 -http test network negative case(host not found, dns not found, no connection, timeouts)
 -http large request and large response
 -make http full client(separate connection and request)
--set global timeout
-  WEBSOCKET:
-  -support binary websocket
-  -ability for websocket to add custom header
+-proper timeout configurations
+
+WEBSOCKET:
+-support binary websocket
+-ability for websocket to add custom header
 
 SOCI:
--rapihin SOCI's CMakeList
--test postgresql
+-tidy up SOCI's CMakeList
 
 Important Modules:
 -Socket TCP/UDP

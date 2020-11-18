@@ -274,6 +274,44 @@ namespace asyik
     as->run();
   }
 
+  TEST_CASE("Test http client timeout", "[http]")
+  {
+    auto as = asyik::make_service();
+
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
+
+    server->on_http_request("/timeout", [](auto req, auto args) {
+
+      asyik::sleep_for(std::chrono::seconds(5));
+
+      req->response.body = "ok";
+      req->response.result(200);
+    });
+
+    asyik::sleep_for(std::chrono::milliseconds(100));
+    as->execute([as]() {
+      LOG(INFO)<<"begin accessing long query..\n";
+      try
+      {
+        auto req = asyik::http_easy_request(as, 3000, "GET", "http://127.0.0.1:4007/timeout", "", {});
+        
+        REQUIRE(false);// if we reach here, somethins is wrong
+      }catch(asyik::network_timeout_error &e)
+      {
+        LOG(INFO)<<"timeout exception catched.\n";
+        REQUIRE(true);
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Caught unexpected exception: "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+      asyik::sleep_for(std::chrono::seconds(3));
+      as->stop();
+    });
+
+    as->run();
+  }
+
   inline void
   load_server_certificate(boost::asio::ssl::context &ctx)
   {
@@ -385,6 +423,14 @@ namespace asyik
       req->response.result(200);
     });
 
+    server->on_http_request("/timeout", [](auto req, auto args) {
+
+      asyik::sleep_for(std::chrono::seconds(5));
+
+      req->response.body = "ok";
+      req->response.result(200);
+    });
+
     asyik::sleep_for(std::chrono::milliseconds(100));
     as->execute([as]() {
       auto req = asyik::http_easy_request(as, "POST", "https://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
@@ -405,6 +451,23 @@ namespace asyik
       REQUIRE(!s.compare("halo"));
 
       ws->close(websocket_close_code::normal, "closed normally");
+
+      LOG(INFO)<<"begin accessing long query(SSL)..\n";
+      try
+      {
+        auto req = asyik::http_easy_request(as, 3000, "GET", "https://127.0.0.1:4004/timeout", "", {});
+        
+        REQUIRE(false);// if we reach here, somethins is wrong
+      }catch(asyik::network_timeout_error &e)
+      {
+        LOG(INFO)<<"timeout exception catched.\n";
+        REQUIRE(true);
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Caught unexpected exception(SSL): "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+      asyik::sleep_for(std::chrono::seconds(3));
 
       as->stop();
     });
@@ -472,6 +535,8 @@ namespace asyik
                       "Content-length: " +
                       std::to_string(body.length()) + "\r\n\r\n";
 
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
       async_send(stream, asio::buffer(s.data(), s.length())).get();
       async_send(stream, asio::buffer(body.data(), body.length())).get();
     });
@@ -488,15 +553,35 @@ namespace asyik
         REQUIRE(!x_test_reply.compare("amiiin"));
       }
 
+      LOG(INFO)<<"performing client requests from inside async()..\n";
+      std::atomic<int> counter = 0;
+      for(int i=0;i<50;i++)
       {
-        auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
+        as->async([as, &counter]()
+        {
+          for(int j=0;j<10;j++)
+          {
+            as->async([as, &counter]()
+            {
+              auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
 
-        REQUIRE(req->response.result() == 200);
-        std::string x_test_reply{req->response.headers["x-test-reply"]};
-        std::string body = req->response.body;
-        REQUIRE(!body.compare("ok"));
-        REQUIRE(!x_test_reply.compare("amiiin"));
+              REQUIRE(req->response.result() == 200);
+              std::string x_test_reply{req->response.headers["x-test-reply"]};
+              std::string body = req->response.body;
+              REQUIRE(!body.compare("ok"));
+              REQUIRE(!x_test_reply.compare("amiiin"));
+              counter++;
+            }).get();
+            asyik::sleep_for(std::chrono::milliseconds(1));
+          }
+        });
+        asyik::sleep_for(std::chrono::milliseconds(10));
       }
+
+      while(counter<500)
+        asyik::sleep_for(std::chrono::milliseconds(50));
+      
+      LOG(INFO)<<"performing client requests from inside async() done.\n";
 
       as->stop();
     });
