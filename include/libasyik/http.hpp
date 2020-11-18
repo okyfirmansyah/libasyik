@@ -90,6 +90,12 @@ namespace asyik
                                      string_view method, string_view url, D &&data,
                                      const std::map<string_view, string_view> &headers);
 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
+                                     int timeout_ms,
+                                     string_view method, string_view url, D &&data,
+                                     const std::map<string_view, string_view> &headers);
+
   struct http_url_scheme
   {
     bool is_ssl;
@@ -377,6 +383,7 @@ namespace asyik
 
     template <typename D>
     friend http_request_ptr http_easy_request(service_ptr as,
+                                              int timeout_ms,
                                               string_view method, string_view url, D &&data,
                                               const std::map<string_view, string_view> &headers);
   };
@@ -481,11 +488,14 @@ namespace asyik
 
   template <typename D>
   http_request_ptr http_easy_request(service_ptr as,
+                                     int timeout_ms,
                                      string_view method, string_view url, D &&data,
                                      const std::map<string_view, string_view> &headers)
   {
     bool result;
     http_url_scheme scheme;
+
+    BOOST_ASSERT(timeout_ms>0);
 
     if (http_analyze_url(url, scheme))
     {
@@ -528,6 +538,8 @@ namespace asyik
 
         beast::ssl_stream<beast::tcp_stream> stream(as->get_io_service().get_executor(), ctx);
 
+        get_lowest_layer(stream).expires_after(std::chrono::milliseconds(timeout_ms));
+
         internal::socket::async_connect(beast::get_lowest_layer(stream), results).get();
         internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
         internal::http::async_write(stream, req->beast_request);
@@ -547,6 +559,8 @@ namespace asyik
       {
         beast::tcp_stream stream(as->get_io_service().get_executor());
 
+        stream.expires_after(std::chrono::milliseconds(timeout_ms));
+
         internal::socket::async_connect(stream, results).get();
         internal::http::async_write(stream, req->beast_request);
         internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
@@ -561,6 +575,14 @@ namespace asyik
       return nullptr;
   };
 
+  template <typename D>
+  http_request_ptr http_easy_request(service_ptr as,
+                                     string_view method, string_view url, D &&data,
+                                     const std::map<string_view, string_view> &headers)
+  {
+    return http_easy_request(as, 30000, method, url, std::forward<D>(data), headers);
+  }
+                                     
   template <typename D>
   http_request_ptr http_easy_request(service_ptr as,
                                      string_view method, string_view url, D &&data)

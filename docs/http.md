@@ -86,6 +86,21 @@ int main()
         LOG(INFO)<<"Body="<<req2->response.body<<"\n";
         LOG(INFO)<<"request success!\n";
       }
+
+      // do client request again, but with TIMEOUT=10s (default is 30s)
+      auto req3 = asyik::http_easy_request(as, 
+                                           10000, //timeout in ms
+                                           "POST", "http://some-host/api", 
+                                           "this is payload", 
+                                           {
+                                            {"x-test", "ok"}  //headers
+                                           });
+
+      if(req3->response.result()==200)
+      {
+        LOG(INFO)<<"Body="<<req2->response.body<<"\n";
+        LOG(INFO)<<"request success!\n";
+      }
       
       as->stop();
     }

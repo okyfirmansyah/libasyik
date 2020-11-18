@@ -47,6 +47,15 @@ namespace asyik
     boost::this_fiber::sleep_for(t);
   }
 
+  struct async_stats
+  {
+    uint32_t task_started;
+    uint32_t task_terminated;
+    uint32_t task_error;
+
+    uint32_t queue_size;
+  };
+
   class service;
   using service_ptr = std::shared_ptr<service>;
   using service_wptr = std::weak_ptr<service>;
@@ -57,6 +66,11 @@ namespace asyik
     {
     };
 
+    static std::atomic<uint32_t> async_task_started;
+    static std::atomic<uint32_t> async_task_terminated;
+    static std::atomic<uint32_t> async_task_error;
+    static std::atomic<uint32_t> async_queue_size;
+
   public:
     ~service(){};
     service &operator=(const service &) = delete;
@@ -66,6 +80,8 @@ namespace asyik
     service &operator=(service &&) = default;
 
     service(struct private_ &&);
+
+    static async_stats get_async_stats();
 
     template <typename F, typename... Args>
     fibers::future<typename std::result_of<F(Args...)>::type> execute(F &&fun, Args &&... args)
@@ -104,6 +120,7 @@ namespace asyik
       auto p = std::make_shared<fibers::promise<typename std::result_of<F(Args...)>::type>>();
       auto future = p->get_future();
       auto t = std::atomic_load(&tasks);
+      async_queue_size++;
       t->push([f = std::forward<F>(fun),
                &args...,
                p]() mutable {
@@ -113,6 +130,7 @@ namespace asyik
         }
         catch (...)
         {
+          async_task_error++;
           p->set_exception(std::current_exception());
         };
       });

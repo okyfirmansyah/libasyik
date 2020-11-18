@@ -9,16 +9,16 @@ namespace asyik
   TEST_CASE("check routing spec to regex spec conversion")
   {
     std::string spec = "/api/v1/face-match";
-    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/?$)"));
+    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/?(|\?[^\?\s]*)$)"));
 
     spec = "/api/v1/face-match/";
-    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/?$)"));
+    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/?(|\?[^\?\s]*)$)"));
 
     spec = "/api/v1/face-match/<int>/";
-    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/([0-9]+)\/?$)"));
+    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/([0-9]+)\/?(|\?[^\?\s]*)$)"));
 
     spec = "/api/v1/face-match/<string>/n/< int  >";
-    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/([^\/\s]+)\/n\/([0-9]+)\/?$)"));
+    REQUIRE(!internal::route_spec_to_regex(spec).compare(R"(^\/api\/v1\/face\-match\/([^\/\?\s]+)\/n\/([0-9]+)\/?(|\?[^\?\s]*)$)"));
   }
 
   TEST_CASE("check http_analyze_url against URL cases")
@@ -74,6 +74,30 @@ namespace asyik
     REQUIRE(!scheme.target.compare("/check"));
     REQUIRE(scheme.port == 443);
     REQUIRE(!scheme.is_ssl);
+
+    result = http_analyze_url("http://10.10.10.1/check?hehe", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.1"));
+    REQUIRE(!scheme.target.compare("/check?hehe"));
+
+    result = http_analyze_url("http://10.10.10.1/check/?result=ok", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.1"));
+    REQUIRE(!scheme.target.compare("/check/?result=ok"));
+
+    result = http_analyze_url("http://10.10.10.1/check/?result=ok&msg=nothing+important&msg2=ok%20done", scheme);
+    REQUIRE(result);
+    REQUIRE(!scheme.host.compare("10.10.10.1"));
+    REQUIRE(!scheme.target.compare("/check/?result=ok&msg=nothing+important&msg2=ok%20done"));
+
+    result = http_analyze_url("http://10.10.10.1/check/?result=ok&msg=nothing+important&msg2=ok done", scheme);
+    REQUIRE(!result);
+
+    result = http_analyze_url("http://he he.com/check/", scheme);
+    REQUIRE(!result);
+
+    result = http_analyze_url("http://he he.com:232/check/", scheme);
+    REQUIRE(!result);
 
     result = http_analyze_url("10.10.10.1:443/", scheme);
     REQUIRE(result);
@@ -202,7 +226,7 @@ namespace asyik
 
     asyik::sleep_for(std::chrono::milliseconds(100));
     as->execute([as]() {
-      auto req = asyik::http_easy_request(as, "POST", "http://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
+      auto req = asyik::http_easy_request(as, "POST", "http://127.0.0.1:4004/post-only/30/name/listed?dummy=hihi", "hehe", {{"x-test", "ok"}});
 
       REQUIRE(req->response.result() == 200);
       std::string x_test_reply{req->response.headers["x-test-reply"]};
@@ -210,13 +234,13 @@ namespace asyik
       REQUIRE(!body.compare("hehe-30-listed-ok"));
       REQUIRE(!x_test_reply.compare("amiiin"));
 
-      req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/999/");
+      req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/999/?dummy1&dummy2=ha+ha");
 
       REQUIRE(req->response.result() == 200);
       REQUIRE(!req->response.body.compare("-GET-999-"));
       REQUIRE(!req->response.headers["x-test-reply"].compare("amiin"));
 
-      req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/123/", "", {{"x-test", "sip"}});
+      req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/any/123?dummy=ha%20ha", "", {{"x-test", "sip"}});
 
       REQUIRE(req->response.result() == 200);
       REQUIRE(!req->response.body.compare("-GET-123-sip"));
@@ -246,6 +270,44 @@ namespace asyik
     // auto client = asyik::make_http_connection(as, "127.0.0.1", "80");
     // auto req=std::make_shared<http_request>();
     // client->send_request(req);
+
+    as->run();
+  }
+
+  TEST_CASE("Test http client timeout", "[http]")
+  {
+    auto as = asyik::make_service();
+
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
+
+    server->on_http_request("/timeout", [](auto req, auto args) {
+
+      asyik::sleep_for(std::chrono::seconds(5));
+
+      req->response.body = "ok";
+      req->response.result(200);
+    });
+
+    asyik::sleep_for(std::chrono::milliseconds(100));
+    as->execute([as]() {
+      LOG(INFO)<<"begin accessing long query..\n";
+      try
+      {
+        auto req = asyik::http_easy_request(as, 3000, "GET", "http://127.0.0.1:4007/timeout", "", {});
+        
+        REQUIRE(false);// if we reach here, somethins is wrong
+      }catch(asyik::network_timeout_error &e)
+      {
+        LOG(INFO)<<"timeout exception catched.\n";
+        REQUIRE(true);
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Caught unexpected exception: "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+      asyik::sleep_for(std::chrono::seconds(3));
+      as->stop();
+    });
 
     as->run();
   }
@@ -361,6 +423,14 @@ namespace asyik
       req->response.result(200);
     });
 
+    server->on_http_request("/timeout", [](auto req, auto args) {
+
+      asyik::sleep_for(std::chrono::seconds(5));
+
+      req->response.body = "ok";
+      req->response.result(200);
+    });
+
     asyik::sleep_for(std::chrono::milliseconds(100));
     as->execute([as]() {
       auto req = asyik::http_easy_request(as, "POST", "https://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
@@ -382,6 +452,23 @@ namespace asyik
 
       ws->close(websocket_close_code::normal, "closed normally");
 
+      LOG(INFO)<<"begin accessing long query(SSL)..\n";
+      try
+      {
+        auto req = asyik::http_easy_request(as, 3000, "GET", "https://127.0.0.1:4004/timeout", "", {});
+        
+        REQUIRE(false);// if we reach here, somethins is wrong
+      }catch(asyik::network_timeout_error &e)
+      {
+        LOG(INFO)<<"timeout exception catched.\n";
+        REQUIRE(true);
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Caught unexpected exception(SSL): "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+      asyik::sleep_for(std::chrono::seconds(3));
+
       as->stop();
     });
 
@@ -395,15 +482,15 @@ namespace asyik
     auto future = promise.get_future();
 
     con.async_write_some(
-      std::forward<Args>(args)...,
-      [prom = std::move(promise)](const boost::system::error_code &ec,
-                                  std::size_t size) mutable {
-        if (!ec)
-          prom.set_value(size);
-        else
-          prom.set_exception(
-            std::make_exception_ptr(asyik::network_error("send error")));
-      });
+        std::forward<Args>(args)...,
+        [prom = std::move(promise)](const boost::system::error_code &ec,
+                                    std::size_t size) mutable {
+          if (!ec)
+            prom.set_value(size);
+          else
+            prom.set_exception(
+                std::make_exception_ptr(asyik::network_error("send error")));
+        });
     return std::move(future);
   }
 
@@ -426,13 +513,14 @@ namespace asyik
       req->activate_direct_response_handling();
 
       std::string body{req->headers["x-test"]};
-      std::string s= "HTTP/1.1 200 OK\r\n"
-                     "Content-type: text/plain\r\n"
-                     "X-Test-Reply: amiiin\r\n"
-                     "Content-length: "+std::to_string(body.length())+"\r\n\r\n";
-                    
-      async_send(stream,  asio::buffer(s.data(), s.length())).get();
-      async_send(stream,  asio::buffer(body.data(), body.length())).get();
+      std::string s = "HTTP/1.1 200 OK\r\n"
+                      "Content-type: text/plain\r\n"
+                      "X-Test-Reply: amiiin\r\n"
+                      "Content-length: " +
+                      std::to_string(body.length()) + "\r\n\r\n";
+
+      async_send(stream, asio::buffer(s.data(), s.length())).get();
+      async_send(stream, asio::buffer(body.data(), body.length())).get();
     });
 
     server2->on_http_request("/manual", "GET", [server2](auto req, auto args) {
@@ -441,36 +529,59 @@ namespace asyik
       req->activate_direct_response_handling();
 
       std::string body{req->headers["x-test"]};
-      std::string s= "HTTP/1.1 200 OK\r\n"
-                     "Content-type: text/plain\r\n"
-                     "X-Test-Reply: amiiin\r\n"
-                     "Content-length: "+std::to_string(body.length())+"\r\n\r\n";
-                    
-      async_send(stream,  asio::buffer(s.data(), s.length())).get();
-      async_send(stream,  asio::buffer(body.data(), body.length())).get();
+      std::string s = "HTTP/1.1 200 OK\r\n"
+                      "Content-type: text/plain\r\n"
+                      "X-Test-Reply: amiiin\r\n"
+                      "Content-length: " +
+                      std::to_string(body.length()) + "\r\n\r\n";
+
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
+      async_send(stream, asio::buffer(s.data(), s.length())).get();
+      async_send(stream, asio::buffer(body.data(), body.length())).get();
     });
 
     asyik::sleep_for(std::chrono::milliseconds(100));
     as->execute([as]() {
       {
-      auto req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/manual", "", {{"x-test", "ok"}});
+        auto req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/manual", "", {{"x-test", "ok"}});
 
-      REQUIRE(req->response.result() == 200);
-      std::string x_test_reply{req->response.headers["x-test-reply"]};
-      std::string body = req->response.body;
-      REQUIRE(!body.compare("ok"));
-      REQUIRE(!x_test_reply.compare("amiiin"));
+        REQUIRE(req->response.result() == 200);
+        std::string x_test_reply{req->response.headers["x-test-reply"]};
+        std::string body = req->response.body;
+        REQUIRE(!body.compare("ok"));
+        REQUIRE(!x_test_reply.compare("amiiin"));
       }
 
+      LOG(INFO)<<"performing client requests from inside async()..\n";
+      std::atomic<int> counter = 0;
+      for(int i=0;i<50;i++)
       {
-      auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
+        as->async([as, &counter]()
+        {
+          for(int j=0;j<10;j++)
+          {
+            as->async([as, &counter]()
+            {
+              auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
 
-      REQUIRE(req->response.result() == 200);
-      std::string x_test_reply{req->response.headers["x-test-reply"]};
-      std::string body = req->response.body;
-      REQUIRE(!body.compare("ok"));
-      REQUIRE(!x_test_reply.compare("amiiin"));
+              REQUIRE(req->response.result() == 200);
+              std::string x_test_reply{req->response.headers["x-test-reply"]};
+              std::string body = req->response.body;
+              REQUIRE(!body.compare("ok"));
+              REQUIRE(!x_test_reply.compare("amiiin"));
+              counter++;
+            }).get();
+            asyik::sleep_for(std::chrono::milliseconds(1));
+          }
+        });
+        asyik::sleep_for(std::chrono::milliseconds(10));
       }
+
+      while(counter<500)
+        asyik::sleep_for(std::chrono::milliseconds(50));
+      
+      LOG(INFO)<<"performing client requests from inside async() done.\n";
 
       as->stop();
     });

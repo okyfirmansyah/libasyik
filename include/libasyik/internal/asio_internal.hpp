@@ -34,6 +34,9 @@ namespace asyik
                                                 size_t sz) mutable {
                         if (!ec)
                             prom.set_value(sz);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during socket::async_read")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
@@ -52,6 +55,9 @@ namespace asyik
                                                 size_t sz) mutable {
                         if (!ec)
                             prom.set_value(sz);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during socket::async_write")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("write_error")));
@@ -69,9 +75,10 @@ namespace asyik
                     [prom = std::move(promise)](const boost::system::error_code &ec,
                                                 size_t sz) mutable {
                         if (!ec)
-                        {
                             prom.set_value(sz);
-                        }
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during socket::async_read_until")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
@@ -105,6 +112,9 @@ namespace asyik
                                                 tcp::resolver::results_type res) mutable {
                         if (!ec)
                             prom.set_value(res);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during socket::async_resolve")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("resolve error")));
@@ -124,6 +134,9 @@ namespace asyik
                                                 tcp::resolver::results_type::endpoint_type res) mutable {
                         if (!ec)
                             prom.set_value(res);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during socket::async_connect")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("connect error")));
@@ -145,6 +158,9 @@ namespace asyik
                                                 size_t sz) mutable {
                         if (!ec)
                             prom.set_value(sz);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during http::async_read")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read error")));
@@ -163,6 +179,9 @@ namespace asyik
                                                 size_t sz) mutable {
                         if (!ec)
                             prom.set_value(sz);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during http::async_write")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("write_error")));
@@ -183,6 +202,9 @@ namespace asyik
                                     [prom = std::move(promise)](const beast::error_code &ec) mutable {
                                         if (!ec)
                                             prom.set_value();
+                                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                                            prom.set_exception(std::make_exception_ptr(
+                                                network_timeout_error("timeout error during socket::async_handshake")));
                                         else
                                             prom.set_exception(std::make_exception_ptr(
                                                 network_error("handshake error")));
@@ -201,6 +223,9 @@ namespace asyik
                                    [prom = std::move(promise)](const beast::error_code &ec) mutable {
                                        if (!ec)
                                            prom.set_value();
+                                       else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                                           prom.set_exception(
+                                               std::make_exception_ptr(network_timeout_error("timeout error during socket::async_shutdown")));
                                        else
                                            prom.set_exception(std::make_exception_ptr(
                                                network_error("shutdown error")));
@@ -223,6 +248,9 @@ namespace asyik
                                                            size_t bytes_transferred) mutable {
                                    if (!ec)
                                        prom.set_value(bytes_transferred);
+                                   else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                                       prom.set_exception(
+                                           std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_read")));
                                    else
                                        prom.set_exception(std::make_exception_ptr(
                                            network_error("read_error")));
@@ -242,6 +270,9 @@ namespace asyik
                                                 size_t bytes_transferred) mutable {
                         if (!ec)
                             prom.set_value(bytes_transferred);
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_read_some")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
@@ -260,6 +291,9 @@ namespace asyik
                                                             size_t bytes_transferred) mutable {
                                     if (!ec)
                                         prom.set_value(bytes_transferred);
+                                    else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                                        prom.set_exception(
+                                            std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_write")));
                                     else
                                         prom.set_exception(std::make_exception_ptr(
                                             network_error("write error")));
@@ -278,6 +312,9 @@ namespace asyik
                     [prom = std::move(promise)](const beast::error_code &ec) mutable {
                         if (!ec)
                             prom.set_value();
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_accept")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("accept error")));
@@ -297,6 +334,9 @@ namespace asyik
                     [prom = std::move(promise)](const beast::error_code &ec) mutable {
                         if (!ec)
                             prom.set_value();
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_handshake")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("handshake error")));
@@ -316,6 +356,9 @@ namespace asyik
                     [prom = std::move(promise)](const beast::error_code &ec) mutable {
                         if (!ec)
                             prom.set_value();
+                        else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
+                            prom.set_exception(
+                                std::make_exception_ptr(network_timeout_error("timeout error during websocket::async_close")));
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("close error")));

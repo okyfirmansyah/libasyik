@@ -31,6 +31,23 @@ namespace asyik
 
   service_ptr make_service() { return std::make_shared<service>(service::private_{}); }
 
+  std::atomic<uint32_t> service::async_task_started;
+  std::atomic<uint32_t> service::async_task_terminated;
+  std::atomic<uint32_t> service::async_task_error;
+  std::atomic<uint32_t> service::async_queue_size;
+
+  async_stats service::get_async_stats()
+  {
+    async_stats stats;
+
+    stats.task_started = async_task_started;
+    stats.task_terminated = async_task_terminated;
+    stats.task_error = async_task_error;
+    stats.queue_size = async_queue_size;
+
+    return stats;
+  }
+
   void service::run()
   {
     fiber fb([as = shared_from_this()]() {
@@ -88,8 +105,11 @@ namespace asyik
         auto safe_tasks = std::atomic_load(&tasks);
         while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk))
         {
+          async_queue_size--;
           fiber fb([tsk_in = std::move(tsk)]() {
+            async_task_started++;
             tsk_in();
+            async_task_terminated++;
           });
 
           fb.detach();
