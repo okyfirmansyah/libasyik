@@ -130,6 +130,9 @@ namespace asyik
     auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
     server->on_websocket("/<int>/name/<string>", [](auto ws, auto args) {
+      ws->set_idle_timeout(2);
+      ws->set_keepalive_pings(true);
+
       while (1)
       {
         auto s = ws->get_string();
@@ -144,7 +147,12 @@ namespace asyik
 
         asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:4004/" + std::to_string(i) + "/name/hash");
 
-        ws->send_string("halo");
+        // this to check if keep alive in server side save us from being timeout'd
+        as->execute([=]() {
+          asyik::sleep_for(std::chrono::milliseconds(2500));
+          ws->send_string("halo");
+        });
+        
         auto s = ws->get_string();
         if (!s.compare(std::to_string(i) + ".halo-hash"))
           success++;
@@ -163,6 +171,8 @@ namespace asyik
 
       asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "wss://echo.websocket.org");
 
+      ws->set_keepalive_pings(true);
+      ws->set_idle_timeout(5);
       ws->send_string("halo");
       auto s = ws->get_string();
       if (!s.compare("halo"))
@@ -176,11 +186,48 @@ namespace asyik
       ws->close(websocket_close_code::normal, "closed normally");
     });
 
+    // check ws client timeout
+    as->execute([=, &success]() {
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
+      asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:4004/0/name/hash");
+
+      ws->set_idle_timeout(1);
+      try
+      {
+        auto s = ws->get_string();
+        REQUIRE(false);
+      }
+      catch(const std::exception& e)
+      {
+        LOG(INFO)<<"websocket idle timeout correctly received: "<<e.what()<<"\n";
+        REQUIRE(true);
+        success++;
+      }
+    });
+
+    // check ws keepalive mechanism(should be timeout'd if keep alive is not processed)
+    as->execute([=, &success]() {
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
+      asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:4004/0/name/hash");  
+      ws->set_idle_timeout(1);
+      ws->set_keepalive_pings(true);
+      as->execute([=]() {
+        asyik::sleep_for(std::chrono::milliseconds(1500));
+        ws->send_string("hello");
+      });
+      auto s = ws->get_string();
+      LOG(INFO)<<"keep alive ping keep ws connection open\n";
+      REQUIRE(!s.compare("0.hello-hash"));
+      success++;
+    });
+
     // task to timeout entire service runtime
     as->execute([=, &success]() {
       for (int i = 0; i < 200; i++) //timeout 20s
       {
-        if (success >= 18)
+        if (success >= 20)
           break;
         asyik::sleep_for(std::chrono::milliseconds(100));
       }
@@ -188,7 +235,7 @@ namespace asyik
     });
 
     as->run();
-    REQUIRE(success == 18);
+    REQUIRE(success == 20);
   }
 
   TEST_CASE("Create http server and client, do some http communications", "[http]")
@@ -505,7 +552,7 @@ namespace asyik
     load_server_certificate(ctx);
 
     auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
-    auto server2 = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4005);
+    auto server2 = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4008);
 
     server->on_http_request("/manual", "GET", [server](auto req, auto args) {
       auto connection = req->get_connection_handle(server);
@@ -563,7 +610,7 @@ namespace asyik
           {
             as->async([as, &counter]()
             {
-              auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4005/manual", "", {{"x-test", "ok"}});
+              auto req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4008/manual", "", {{"x-test", "ok"}});
 
               REQUIRE(req->response.result() == 200);
               std::string x_test_reply{req->response.headers["x-test-reply"]};

@@ -113,11 +113,12 @@ void some_handler(asyik::service_ptr as)
 ```
 
 ## More Documentations(Work In Progress)
- - Features:
+ - Features/Modules:
    - [Logging](docs/logging.md)
    - [Fiber Framework](docs/service.md)
    - [HTTP/Websocket](docs/http.md)
    - [SOCI/SQL](docs/sql.md)
+   - [Internal KV Cache](docs/cache.md)
  - Design/Rationale
    - [Why Fiber?](docs/why.md)
    - [Multithreading approach in Libasyik ](docs/designs.md)

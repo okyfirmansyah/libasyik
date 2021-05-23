@@ -414,6 +414,9 @@ namespace asyik
   public:
     virtual std::string get_string(){};
     virtual void send_string(string_view s){};
+    virtual void set_keepalive_pings(bool b){};
+    virtual void set_idle_timeout(int t){};
+
     void close(websocket_close_code code)
     {
       close(code, "NORMAL");
@@ -469,6 +472,24 @@ namespace asyik
     {
       internal::websocket::async_write(*ws, asio::buffer(s.data(), s.length())).get();
     }
+
+    virtual void set_keepalive_pings(bool b)
+    {
+      beast::websocket::stream_base::timeout opt;
+      
+      ws->get_option(opt);
+      opt.keep_alive_pings = b;
+      ws->set_option(opt);
+    };
+    
+    virtual void set_idle_timeout(int t)
+    {
+      beast::websocket::stream_base::timeout opt;
+      
+      ws->get_option(opt);
+      opt.idle_timeout = std::chrono::seconds(t);
+      ws->set_option(opt);
+    };
 
     virtual void close(websocket_close_code code, string_view reason)
     {
