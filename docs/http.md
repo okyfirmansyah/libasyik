@@ -286,3 +286,43 @@ data: halo 2
 
 [repeat indefinitely each 1 secs...]
 ```
+
+#### Advanced Topic: Set Websocket Idle Timeout and Keep-alive Ping
+Any WebSocket client and server application can tell the healthiness of a particular connection by observing that data transmission and reception happening without exception or error. Now, the tricky part is when doing/waiting data reception as we can not immediately tell whether there is indeed no data available from another end, or the connection itself already falling apart.
+
+One way to detect adverse connection problems is using idle timeout. Here, the party that doing data reception will close the connection when it does not receive data after a certain period of time.
+
+You can use **set_idle_timeout(sec)** to set a particular connection's idle timeout:
+```c++
+asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "wss://echo.websocket.org");
+ws->set_idle_timeout(5);
+
+// if after 5s, we don't get any data, this line will throw exception
+auto s = ws->get_string();
+```
+
+You can also set the timeout for server connection as well:
+```c++
+server->on_websocket("/ws_endpoint", [](auto ws, auto args) {
+  ws->set_idle_timeout(2);
+
+  // if after 2s, no data is received from the client, this line will throw timeout exception
+  auto s = ws->get_string();
+  ...
+ });
+ ```
+ 
+### Configuring Keep-alive mechanism
+In most cases, it's not really convenient to set idle timeout alone, for e.g some WebSocket use case scenario can have no data in a minute while the transmission itself is still intact, so killing and renewing the connection will be inefficient. With the keep-alive mechanism, you can push underlying WebSocket protocol implementation to send and receive control messages, so it will be counted as aliveness/healthiness check of the connection.
+
+When waiting for incoming data, the WebSocket implementation will send PING behind the scene and expect PONG reply from the other end, this invisible control message exchange will prolong the timeout period:
+```c++
+asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "wss://echo.websocket.org");
+ws->set_idle_timeout(5);
+ws->set_keepalive_pings(true);
+
+// during the 5s window, if there is no data received, PING-PONG exchange will be performed to proble the connection liveness
+auto s = ws->get_string();
+```
+
+**note:** If the other end that expected to reply PING with PONG is also libasyik WebSocket(based on boost::beast), then the other end will have to be in the process of receiving data as well, otherwise the PONG will not be emitted.
