@@ -3,6 +3,7 @@
 #include "libasyik/service.hpp"
 #include "libasyik/http.hpp"
 #include "libasyik/sql.hpp"
+#include "libasyik/memcache.hpp"
 
 using namespace asyik;
 
@@ -13,4 +14,6 @@ TEST_CASE("Invoke all test units", "[asyik]")
   _TEST_invoke_service();
   _TEST_invoke_http();
   _TEST_invoke_sql();
+
+  _TEST_invoke_memcache();
 }
