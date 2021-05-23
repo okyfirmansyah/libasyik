@@ -167,7 +167,7 @@ namespace asyik
 
         // Turn off the timeout on the tcp_stream, because
         // the websocket stream has its own timeout system.
-        beast::get_lowest_layer(beast::get_lowest_layer(*new_ws->ws)).expires_never();
+        beast::get_lowest_layer(*new_ws->ws).expires_never();
 
         // Set suggested timeout settings for the websocket
         new_ws->ws->set_option(
@@ -209,7 +209,7 @@ namespace asyik
 
         // Turn off the timeout on the tcp_stream, because
         // the websocket stream has its own timeout system.
-        beast::get_lowest_layer(beast::get_lowest_layer(*new_ws->ws)).expires_never();
+        beast::get_lowest_layer(*new_ws->ws).expires_never();
 
         // Set suggested timeout settings for the websocket
         new_ws->ws->set_option(
