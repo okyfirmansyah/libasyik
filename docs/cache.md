@@ -8,6 +8,7 @@ The downside is inability to assign precise TTL per single cache entry. TTL is a
 
 ```c++
 auto as = asyik::make_service();
+// create cache<string, int> with expiration 1s, with 50segments
 auto cache = asyik::make_memcache<std::string, int, 1, 50>(as);
 
 as->execute([cache, as]()
@@ -38,6 +39,7 @@ The example above use **make_memcache()** to generate cache instance that expect
 In order to create cache that is safe to be accessed in any thread, you can use **make_memcache_mt()**:
 ```c++
 auto as = asyik::make_service();
+// thread-safe cache
 auto cache = asyik::make_memcache_mt<std::string, int, 1, 50>(as);
 
 as->async([cache, as]() // it is now safe to use async(will be performed in worker thread)
