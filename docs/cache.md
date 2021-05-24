@@ -7,6 +7,11 @@ The write operation always uses youngest segment. The read operation lookup key 
 The downside is inability to assign precise TTL per single cache entry. TTL is always approximated to nearest segment. (e.g. cache with 60 sec TTL and 10 segments has 6 sec accuracy on TTL).
 
 ```c++
+#include "catch2/catch.hpp"
+#include "libasyik/error.hpp"
+#include "libasyik/service.hpp"
+#include "libasyik/memcache.hpp"
+
 auto as = asyik::make_service();
 // create cache<string, int> with expiration 1s, with 50segments
 auto cache = asyik::make_memcache<std::string, int, 1, 50>(as);
