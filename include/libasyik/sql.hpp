@@ -68,7 +68,7 @@ namespace asyik
     {
         auto p = std::make_shared<sql_pool>(sql_pool::private_{});
 
-        for (int i = 0; i < num_pool; i++)
+        for (size_t i = 0; i < num_pool; i++)
         {
             std::lock_guard<fibers::mutex> l(p->mtx_);
             auto s = std::make_unique<soci::session>(std::forward<F>(factory), std::forward<C>(connectString));

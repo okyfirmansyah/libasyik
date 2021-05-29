@@ -412,10 +412,10 @@ namespace asyik
 
     //API
   public:
-    virtual std::string get_string(){};
-    virtual void send_string(string_view s){};
-    virtual void set_keepalive_pings(bool b){};
-    virtual void set_idle_timeout(int t){};
+    virtual std::string get_string()=0;
+    virtual void send_string(string_view s)=0;
+    virtual void set_keepalive_pings(bool b)=0;
+    virtual void set_idle_timeout(int t)=0;
 
     void close(websocket_close_code code)
     {
@@ -513,7 +513,6 @@ namespace asyik
                                      string_view method, string_view url, D &&data,
                                      const std::map<string_view, string_view> &headers)
   {
-    bool result;
     http_url_scheme scheme;
 
     BOOST_ASSERT(timeout_ms>0);
@@ -707,8 +706,6 @@ namespace asyik
                 // handle it like a normal HTTP request.
                 auto &res = asyik_req->response.beast_response;
 
-                http_response_headers &res_header = res.base();
-                http_response_body &res_body = res.body();
                 asyik_req->response.headers.set(http::field::server, LIBASYIK_VERSION_STRING);
                 asyik_req->response.headers.set(http::field::content_type, "text/html");
                 asyik_req->response.beast_response.keep_alive(asyik_req->beast_request.keep_alive());

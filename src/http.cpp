@@ -127,7 +127,6 @@ namespace asyik
                                           string_view url,
                                           const int timeout)
   {
-    bool result;
     http_url_scheme scheme;
 
     if (http_analyze_url(url, scheme))
@@ -160,8 +159,7 @@ namespace asyik
         // Set the timeout for the operation
         beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
-        tcp::resolver::results_type::endpoint_type ep =
-            internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
+        internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         internal::ssl::async_handshake(new_ws->ws->next_layer(), ssl::stream_base::client).get();
 
@@ -204,8 +202,7 @@ namespace asyik
         beast::get_lowest_layer(*new_ws->ws).expires_after(std::chrono::seconds(timeout));
 
         // Make the connection on the IP address we get from a lookup
-        tcp::resolver::results_type::endpoint_type ep =
-            internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
+        internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results).get();
 
         // Turn off the timeout on the tcp_stream, because
         // the websocket stream has its own timeout system.
