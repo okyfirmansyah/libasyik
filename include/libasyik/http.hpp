@@ -413,7 +413,9 @@ namespace asyik
     //API
   public:
     virtual std::string get_string()=0;
+    virtual size_t read_basic_buffer(std::vector<uint8_t> &b)=0;
     virtual void send_string(string_view s)=0;
+    virtual void write_basic_buffer(const std::vector<uint8_t> &b)=0;
     virtual void set_keepalive_pings(bool b)=0;
     virtual void set_idle_timeout(int t)=0;
 
@@ -464,13 +466,32 @@ namespace asyik
       auto buffer = asio::dynamic_buffer(message);
 
       internal::websocket::async_read(*ws, buffer).get();
+      if(ws->got_binary())
+        throw asyik::unexpected_error("unexpected binary message when get_string()");
 
       return message;
     }
 
     virtual void send_string(string_view s)
     {
+      ws->binary(false);
       internal::websocket::async_write(*ws, asio::buffer(s.data(), s.length())).get();
+    }
+
+    // basic buffer API
+    virtual size_t read_basic_buffer(std::vector<uint8_t> &b)
+    {
+      //auto buffer = asio::dynamic_buffer(b);
+      asio::mutable_buffer mb(b.data(), b.size());
+      auto buffer = beast::buffers_adaptor(mb);
+
+      return internal::websocket::async_read(*ws, buffer).get();
+    }
+
+    virtual void write_basic_buffer(const std::vector<uint8_t> &b)
+    {
+      ws->binary(true);
+      internal::websocket::async_write(*ws, asio::buffer(b.data(), b.size())).get();
     }
 
     virtual void set_keepalive_pings(bool b)
