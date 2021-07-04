@@ -165,6 +165,34 @@ void main()
 }
 ```
 
+#### Sending/Reading Binary Buffer
+Libasyik support basic sending/reading binary buffer in websocket connection as std::vector<uint8_t>
+```c++
+void main()
+{
+    auto as = asyik::make_service();
+
+    as->execute([=]() {
+      // connect to echo test server
+      asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "wss://echo.websocket.org");
+
+      std::vector<uint8_t> buff;
+      // fill the binary buff here
+      ...
+      ws->write_basic_buffer(buff);
+      
+      // reading binary
+      std::vector<uint8_t> read_buff;
+      read_buff.resize(1024); // prepare max size
+      auto read_size=ws->read_bassic_buffer(read_buff); // if read_size>max size, exception will be thrown
+      read_buff.resize(read_size); // trim size based on actual received message
+      ...
+    });
+
+    as->run();
+}
+```
+
 #### Create SSL Server
 To create HTTPS server, use the same templates but now using **make_https_server()**, for e.g:
 ```c++

@@ -635,4 +635,84 @@ namespace asyik
 
     as->run();
   }
+
+  TEST_CASE("Test websocket binary", "[http]")
+  {
+    auto as = asyik::make_service();
+
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
+    std::vector<uint8_t> buff;
+    for(int i=0;i<1024;i++) buff.push_back((uint8_t)rand()%256);
+
+    server->on_websocket("/binary_test", [&buff](auto ws, auto args) {
+      try
+      {
+        auto s = ws->get_string();
+        REQUIRE(!s.compare("this is text"));
+        
+        std::vector<uint8_t> b;
+        b.resize(1024);
+        ws->read_basic_buffer(b);
+        REQUIRE(b==buff);
+
+        auto s2 = ws->get_string();
+        REQUIRE(!s2.compare("again, this is text"));
+
+        try
+        {
+          auto s3 = ws->get_string();
+          REQUIRE(false);
+        }catch(asyik::unexpected_error &e)
+        {
+          LOG(INFO)<<"catch exception because we got binary when we're actually expect text(expected)\n";
+        }
+
+        auto s3 = ws->get_string();
+        REQUIRE(!s3.compare("third, this is text"));
+
+        std::vector<uint8_t> b2;
+        b2.resize(2048);
+        auto sz=ws->read_basic_buffer(b2);
+        b2.resize(sz); // change actual resulting output buffer size
+        REQUIRE(b2==buff);
+
+        try
+        {
+          std::vector<uint8_t> b;
+          b.resize(512);
+          ws->read_basic_buffer(b);
+          REQUIRE(false);
+        }
+        catch(asyik::network_error &e)
+        {
+          LOG(INFO)<<"got exception: "<<e.what()<<"(expected)\n";
+        }
+      }catch(...)
+      {
+        LOG(INFO)<<"got unexpected exception in handler binary_test\n";
+        REQUIRE(false);
+      }
+    });
+
+    // check ws client timeout
+    as->execute([as, &buff]() {
+      asyik::sleep_for(std::chrono::milliseconds(50));
+
+      asyik::websocket_ptr ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:4006/binary_test");
+
+      ws->send_string("this is text");
+      ws->write_basic_buffer(buff);
+      ws->send_string("again, this is text");
+      ws->write_basic_buffer(buff);
+      ws->send_string("third, this is text");
+      ws->write_basic_buffer(buff);
+      ws->write_basic_buffer(buff);
+
+      asyik::sleep_for(std::chrono::milliseconds(500));
+      as->stop();
+      LOG(INFO)<<"binary test completed\n";
+    });
+    
+    as->run();
+  }
 } // namespace asyik
