@@ -228,6 +228,25 @@ int main()
 ```
 Please take a look at [Beast's example](https://www.boost.org/doc/libs/1_73_0/libs/beast/example/common/server_certificate.hpp) for an example on how to perform SSL context creation/**load_server_certificate()**.
 
+#### Set Incoming Request Body and Header Size Limits
+To protect against unbounded incoming data size(overflow or out of memory error), by default, incoming request header and body size are set to both 1MB each.  You can override these two settings using following:
+```c++
+int main()
+{
+    ...
+    
+    server->on_http_request("/", "GET", [](auto req, auto args) {
+      req->response.body = "hello world";
+      req->response.result(200);
+    });
+
+    server->set_request_header_limit(1*1024*1024); // set incoming header max size to 1MB
+    server->set_request_body_limit(8*1024*1024);   // set incoming body max size to 8MB
+    
+    ...
+}
+```
+
 #### Advanced Topic: Handle HTTP Connection and Its Responses Manually
 Sometimes we want to do something different that simple HTTP request and response, one use case is doing server side event stream(SSE) so the client can have mutiple datas/events, transmitted in realtime and on a single, long connection.
 

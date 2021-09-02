@@ -30,6 +30,11 @@ namespace asyik
 {
   void _TEST_invoke_http();
 
+  static const size_t default_request_body_limit = 1*1024*1024;
+  static const size_t default_request_header_limit = 1*1024*1024;
+  static const size_t default_response_body_limit = 16*1024*1024;
+  static const size_t default_response_header_limit = 1*1024*1024;
+
   template <typename StreamType>
   class http_connection;
   template <typename StreamType>
@@ -174,6 +179,26 @@ namespace asyik
       return nullptr;
     }
 
+    size_t get_request_header_limit()const
+    {
+      return request_header_limit;
+    }
+
+    size_t get_request_body_limit()const
+    {
+      return request_body_limit;
+    }
+
+    void set_request_header_limit(size_t l)
+    {
+      request_header_limit = l;
+    }
+
+    void set_request_body_limit(size_t l)
+    {
+      request_body_limit = l;
+    }
+
   private:
     void start_accept(asio::io_context &io_service);
 
@@ -227,6 +252,9 @@ namespace asyik
     std::vector<websocket_route_tuple> ws_routes;
 
     std::shared_ptr<ssl::context> ssl_context;
+
+    size_t request_body_limit;
+    size_t request_header_limit;
 
     template <typename S>
     friend class http_connection;
@@ -584,7 +612,12 @@ namespace asyik
         internal::socket::async_connect(beast::get_lowest_layer(stream), results).get();
         internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
         internal::http::async_write(stream, req->beast_request);
-        internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
+
+        http::response_parser<http::string_body> resp_parser;
+        resp_parser.body_limit(default_response_body_limit);
+        resp_parser.header_limit(default_response_header_limit);
+        internal::http::async_read(stream, req->buffer, resp_parser).get();
+        req->response.beast_response = resp_parser.release();
 
         try{internal::ssl::async_shutdown(stream).get();}
         catch(...)
@@ -604,7 +637,12 @@ namespace asyik
 
         internal::socket::async_connect(stream, results).get();
         internal::http::async_write(stream, req->beast_request);
-        internal::http::async_read(stream, req->buffer, req->response.beast_response).get();
+
+        http::response_parser<http::string_body> resp_parser;
+        resp_parser.body_limit(default_response_body_limit);
+        resp_parser.header_limit(default_response_header_limit);
+        internal::http::async_read(stream, req->buffer, resp_parser).get();
+        req->response.beast_response = resp_parser.release();
 
         beast::error_code ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
@@ -660,7 +698,9 @@ namespace asyik
     {
       if (auto service = server->service.lock())
       {
-        service->execute([p = this->shared_from_this()](void) {
+        service->execute([p = this->shared_from_this(), 
+                          body_limit = server->get_request_body_limit(),
+                          header_limit = server->get_request_header_limit()](void) {
           try
           {
             ip::tcp::no_delay option(true);
@@ -673,7 +713,12 @@ namespace asyik
             asyik_req->connection_wptr=http_connection_wptr<StreamType>(p);
             while (1)
             {
-              asyik::internal::http::async_read(p->get_stream(), asyik_req->buffer, req).get();
+              http::request_parser<http::string_body> req_parser;
+              req_parser.body_limit(body_limit);
+              req_parser.header_limit(header_limit);
+
+              asyik::internal::http::async_read(p->get_stream(), asyik_req->buffer, req_parser).get();
+              req = req_parser.release();
 
               // See if its a WebSocket upgrade request
               if (beast::websocket::is_upgrade(req))
@@ -783,7 +828,7 @@ namespace asyik
 
   template <typename StreamType>
   http_server<StreamType>::http_server(struct private_ &&, service_ptr as, string_view addr, uint16_t port)
-      : service(as)
+      : service(as), request_body_limit(default_request_body_limit), request_header_limit(default_request_header_limit)
   {
     acceptor = std::make_shared<ip::tcp::acceptor>(as->get_io_service(),
                                                    ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port), true);
