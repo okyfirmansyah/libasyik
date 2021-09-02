@@ -52,7 +52,7 @@ namespace asyik
 
         }
 
-        void put(Key &&k, T && v)
+        void put(const Key &k, T && v)
         {
             using namespace std::chrono;
             typename thread_policy::guard_type t(mtx);
@@ -68,11 +68,11 @@ namespace asyik
 
             if((map_list.begin()!=map_list.end()) && (map_list.begin()->first >= expiry_at))
             {
-                map_list.begin()->second[std::forward<Key>(k)]=std::forward<T>(v);
+                map_list.begin()->second[k]=std::forward<T>(v);
             }else // create new cluster
             {
                 std::map<Key, T> m;
-                m.emplace(std::forward<Key>(k), std::forward<T>(v));
+                m.emplace(k, std::forward<T>(v));
                 map_list[expiry_at+(expiry*1000/segments)] = std::move(m);
             }
         }
