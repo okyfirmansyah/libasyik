@@ -817,6 +817,20 @@ namespace asyik
             }
             p->shutdown_ssl();
           }
+          // TODO: all HTTP 5xx and 4xx handling should be put here instead
+          catch (overflow_error &e)
+          {
+            http_beast_response beast_response;
+            beast_response.body() = e.what();
+            beast_response.keep_alive(false);
+            beast_response.result(413);
+
+            beast_response.prepare_payload();
+            http::serializer<false, http::string_body> sr{beast_response};
+            asyik::internal::http::async_write(p->get_stream(), beast_response).get();
+
+            p->shutdown_ssl();
+          }
           catch (std::exception &e)
           {
             LOG(WARNING) << "exception is catched during client connection, reason: " << e.what() << "\n";

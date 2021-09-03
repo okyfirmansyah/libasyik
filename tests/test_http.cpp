@@ -341,22 +341,26 @@ namespace asyik
       try
       {
         req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/big_size", binary, {});
-        REQUIRE(false);
+        REQUIRE(req->response.result()==413);
+        LOG(INFO)<<"Got correct HTTP 413: "<<req->response.body<<"\n";
       }catch(std::exception &e)
       {
-        LOG(INFO)<<"Got correct exception for oversize http request body. What: "<<e.what()<<"\n";
+        LOG(ERROR)<<"Unexpected exception for oversize http request body. What: "<<e.what()<<"\n";
+        REQUIRE(false);
       }
 
-      // body limit negative case
+      // header limit negative case
       binary.resize(2*1024);
       memset(&binary[0], 'A', binary.size());
       try
       {
         req = asyik::http_easy_request(as, "GET", "http://127.0.0.1:4004/big_size", " ", {{"x-big", binary}});
-        REQUIRE(false);
+        REQUIRE(req->response.result()==413);
+        LOG(INFO)<<"Got correct HTTP 413: "<<req->response.body<<"\n";
       }catch(std::exception &e)
       {
-        LOG(INFO)<<"Got correct exception for oversize http request header. What: "<<e.what()<<"\n";
+        LOG(ERROR)<<"Unexpected exception for oversize http request header. What: "<<e.what()<<"\n";
+        REQUIRE(false);
       }
 
       as->stop();
@@ -526,6 +530,15 @@ namespace asyik
       req->response.result(200);
     });
 
+    server->on_http_request("/big_size/", [](auto req, auto args) {
+      REQUIRE(req->body.size()==std::stoull(std::string(req->headers["Content-Length"])));
+      LOG(INFO)<<"HTTP payload with big size received successfully\n";
+      req->response.result(200);
+    });
+
+    server->set_request_body_limit(20*1024*1024);
+    server->set_request_header_limit(1024);
+
     asyik::sleep_for(std::chrono::milliseconds(100));
     as->execute([as]() {
       auto req = asyik::http_easy_request(as, "POST", "https://127.0.0.1:4004/post-only/30/name/listed", "hehe", {{"x-test", "ok"}});
@@ -563,6 +576,48 @@ namespace asyik
         REQUIRE(false);
       }
       asyik::sleep_for(std::chrono::seconds(3));
+
+      // Test SSL Big size
+      std::string binary;
+      binary.resize(16*1024*1024);
+      memset(&binary[0], ' ', binary.size());
+      try
+      {
+        req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4004/big_size", binary, {});
+        REQUIRE(req->response.result() == 200);
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"test big size(SSL) payload failed. What: "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+
+      // body limit negative case
+      binary.resize(24*1024*1024);
+      memset(&binary[0], ' ', binary.size());
+      try
+      {
+        req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4004/big_size", binary, {});
+        REQUIRE(req->response.result()==413);
+        LOG(INFO)<<"(SSL oversize test)Got correct HTTP 413: "<<req->response.body<<"\n";
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Unexpected exception for oversize http(SSL) request body. What: "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
+
+      // header limit negative case
+      binary.resize(2*1024);
+      memset(&binary[0], 'A', binary.size());
+      try
+      {
+        req = asyik::http_easy_request(as, "GET", "https://127.0.0.1:4004/big_size", " ", {{"x-big", binary}});
+        REQUIRE(req->response.result()==413);
+        LOG(INFO)<<"(SSL oversize test)Got correct HTTP 413: "<<req->response.body<<"\n";
+      }catch(std::exception &e)
+      {
+        LOG(ERROR)<<"Unexpected exception for oversize http(SSL) request header. What: "<<e.what()<<"\n";
+        REQUIRE(false);
+      }
 
       as->stop();
     });
