@@ -161,6 +161,16 @@ namespace asyik
                         else if((ec == asio::error::timed_out)||(ec == beast::error::timeout))
                             prom.set_exception(
                                 std::make_exception_ptr(network_timeout_error("timeout error during http::async_read")));
+                        else if(ec == beast::http::error::header_limit)
+                        {
+                            prom.set_exception(
+                                std::make_exception_ptr(overflow_error("incoming request header size is too large")));
+                        }
+                        else if(ec == beast::http::error::body_limit)
+                        {
+                            prom.set_exception(
+                                std::make_exception_ptr(overflow_error("incoming request body size is too large")));
+                        }
                         else
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read error")));
