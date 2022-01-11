@@ -1,7 +1,7 @@
 #ifndef LIBASYIK_COMMON_HPP
 #define LIBASYIK_COMMON_HPP
 
-#include "boost/fiber/all.hpp"
+#include "boost/config/helper_macros.hpp"
 #include "boost/utility/string_view.hpp"
 #include "version.hpp"
 
