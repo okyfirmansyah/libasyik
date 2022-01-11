@@ -1,13 +1,10 @@
 #ifndef LIBASYIK_MEMCACHE_HPP
 #define LIBASYIK_MEMCACHE_HPP
 
-#include <list>
 #include <memory>
-#include <algorithm>
-#include <functional>
-#include <boost/fiber/all.hpp>
+#include <boost/fiber/mutex.hpp>
 #include "common.hpp"
-#include "libasyik/service.hpp"
+#include "libasyik/asyik_fwd.hpp"
 #include "libasyik/error.hpp"
 
 namespace asyik

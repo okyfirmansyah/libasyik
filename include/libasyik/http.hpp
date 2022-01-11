@@ -1,5 +1,7 @@
 #ifndef LIBASYIK_ASYIK_HTTP_HPP
 #define LIBASYIK_ASYIK_HTTP_HPP
+
+#include "libasyik/asyik_fwd.hpp"
 #include <string>
 #include <regex>
 #include <any>
@@ -12,7 +14,6 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
-#include "service.hpp"
 #include "error.hpp"
 #include "boost/algorithm/string/predicate.hpp"
 #include "internal/asio_internal.hpp"
@@ -35,29 +36,7 @@ namespace asyik
   static const size_t default_response_body_limit = 16*1024*1024;
   static const size_t default_response_header_limit = 1*1024*1024;
 
-  template <typename StreamType>
-  class http_connection;
-  template <typename StreamType>
-  using http_connection_ptr = std::shared_ptr<http_connection<StreamType>>;
-  template <typename StreamType>
-  using http_connection_wptr = std::weak_ptr<http_connection<StreamType>>;
-
-  class websocket;
-  using websocket_ptr = std::shared_ptr<websocket>;
-
   using http_route_args = std::vector<std::string>;
-
-  template <typename StreamType>
-  class http_server;
-  template <typename StreamType>
-  using http_server_ptr = std::shared_ptr<http_server<StreamType>>;
-  template <typename StreamType>
-  using http_server_wptr = std::weak_ptr<http_server<StreamType>>;
-
-  class http_request;
-  using http_request_ptr = std::shared_ptr<http_request>;
-  using http_request_wptr = std::weak_ptr<http_request>;
-  using http_result = uint16_t;
 
   using http_beast_request = boost::beast::http::request<boost::beast::http::string_body>;
   using http_beast_response = boost::beast::http::response<boost::beast::http::string_body>;
@@ -73,9 +52,6 @@ namespace asyik
   using websocket_route_tuple = std::tuple<std::string, std::regex, websocket_route_callback>;
 
   using websocket_close_code = boost::beast::websocket::close_code;
-
-  using http_stream_type = tcp::socket;
-  using https_stream_type = beast::ssl_stream<tcp::socket&>;
 
   http_server_ptr<http_stream_type> make_http_server(service_ptr as, string_view addr, uint16_t port = 80);
   http_server_ptr<https_stream_type> make_https_server(service_ptr, ssl::context &&ssl, string_view, uint16_t port = 443);
