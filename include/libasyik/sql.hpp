@@ -1,13 +1,14 @@
 #ifndef LIBASYIK_ASYIK_SQL_HPP
 #define LIBASYIK_ASYIK_SQL_HPP
+
 #include <string>
-#include <regex>
 #include <list>
-#include "boost/fiber/all.hpp"
-#include "aixlog.hpp"
-#include "service.hpp"
-#include "boost/algorithm/string/predicate.hpp"
+
 #include "common.hpp"
+#include "aixlog.hpp"
+#include "asyik_fwd.hpp"
+#include "boost/algorithm/string/predicate.hpp"
+#include "boost/fiber/all.hpp"
 #include "internal/soci_internal.hpp"
 #include "soci.h"
 #include "soci-sqlite3.h"
@@ -22,14 +23,6 @@ namespace asyik
 
     static auto &sql_backend_postgresql = soci::postgresql;
     static auto &sql_backend_sqlite3 = soci::sqlite3;
-
-    class sql_pool;
-    using sql_pool_wptr = std::weak_ptr<sql_pool>;
-    using sql_pool_ptr = std::shared_ptr<sql_pool>;
-
-    class sql_session;
-    using sql_session_wptr = std::weak_ptr<sql_session>;
-    using sql_session_ptr = std::shared_ptr<sql_session>;
 
     template <typename F, typename C>
     sql_pool_ptr make_sql_pool(F &&factory, C &&connectString, size_t num_pool = 2);

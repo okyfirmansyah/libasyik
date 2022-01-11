@@ -1,9 +1,11 @@
 #ifndef LIBASYIK_ASYIK_SERVICE_HPP
 #define LIBASYIK_ASYIK_SERVICE_HPP
+
 #include <string>
 #include <type_traits>
 #include "boost/fiber/all.hpp"
-#include "libasyik/common.hpp"
+#include "common.hpp"
+#include "asyik_fwd.hpp"
 #include "aixlog.hpp"
 #include "boost/asio.hpp"
 
@@ -56,9 +58,6 @@ namespace asyik
     uint32_t queue_size;
   };
 
-  class service;
-  using service_ptr = std::shared_ptr<service>;
-  using service_wptr = std::weak_ptr<service>;
   class service : public std::enable_shared_from_this<service>
   {
   private:
