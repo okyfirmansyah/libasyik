@@ -1,6 +1,6 @@
-#include "catch2/catch.hpp"
-#include "libasyik/service.hpp"
 #include "libasyik/http.hpp"
+#include "libasyik/service.hpp"
+#include "catch2/catch.hpp"
 
 namespace asyik
 {

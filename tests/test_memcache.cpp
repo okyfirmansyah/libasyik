@@ -1,7 +1,7 @@
-#include "catch2/catch.hpp"
+#include "libasyik/memcache.hpp"
 #include "libasyik/error.hpp"
 #include "libasyik/service.hpp"
-#include "libasyik/memcache.hpp"
+#include "catch2/catch.hpp"
 
 namespace asyik 
 {
@@ -164,7 +164,7 @@ TEST_CASE("Testing multithreading")
   auto as = asyik::make_service();
   auto cache = asyik::make_memcache_mt<int, int, 1, 50>(as);
 
-  std::atomic<int> num_done = 0;
+  std::atomic<int> num_done{0};
   for(int i=0;i<64;i++)
     as->async([cache, as, i, &num_done]()
     {
