@@ -7,7 +7,6 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/fiber/all.hpp>
-#include "libasyik/error.hpp"
 
 namespace asio = boost::asio;
 namespace fibers = boost::fibers;
@@ -41,7 +40,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
                     });
-                return std::move(future);
+                return future;
             };
 
             template <typename... Args>
@@ -62,7 +61,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("write_error")));
                     });
-                return std::move(future);
+                return future;
             };
 
             template <typename... Args>
@@ -83,7 +82,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
                     });
-                return std::move(future);
+                return future;
             };
 
             template <typename T>
@@ -97,7 +96,7 @@ namespace asyik
                         prom.set_value();
                     });
 
-                return std::move(future);
+                return future;
             };
 
             template <typename Resolver, typename... Args>
@@ -119,7 +118,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("resolve error")));
                     });
-                return std::move(future);
+                return future;
             };
 
             template <typename Conn, typename... Args>
@@ -141,7 +140,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("connect error")));
                     });
-                return std::move(future);
+                return future;
             }
         } // namespace socket
 
@@ -175,7 +174,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read error")));
                     });
-                return std::move(future);
+                return future;
             };
 
             template <typename... Args>
@@ -196,7 +195,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("write_error")));
                     });
-                return std::move(future);
+                return future;
             };
         } // namespace http
 
@@ -220,7 +219,7 @@ namespace asyik
                                                 network_error("handshake error")));
                                     });
 
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -241,7 +240,7 @@ namespace asyik
                                                network_error("shutdown error")));
                                    });
 
-                return std::move(future);
+                return future;
             }
         } // namespace ssl
 
@@ -265,7 +264,7 @@ namespace asyik
                                        prom.set_exception(std::make_exception_ptr(
                                            network_error("read_error")));
                                });
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -287,7 +286,7 @@ namespace asyik
                             prom.set_exception(
                                 std::make_exception_ptr(network_error("read_error")));
                     });
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -308,7 +307,7 @@ namespace asyik
                                         prom.set_exception(std::make_exception_ptr(
                                             network_error("write error")));
                                 });
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -330,7 +329,7 @@ namespace asyik
                                 std::make_exception_ptr(network_error("accept error")));
                     });
 
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -352,7 +351,7 @@ namespace asyik
                                 std::make_exception_ptr(network_error("handshake error")));
                     });
 
-                return std::move(future);
+                return future;
             }
 
             template <typename Conn, typename... Args>
@@ -374,7 +373,7 @@ namespace asyik
                                 std::make_exception_ptr(network_error("close error")));
                     });
 
-                return std::move(future);
+                return future;
             }
         } // namespace websocket
     }     //namespace internal

@@ -1,4 +1,8 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG C.UTF-8
+ENV LC_ALL C.UTF-8
 
 RUN apt-get -y update && \
     apt-get -y upgrade && \

@@ -101,7 +101,7 @@ namespace asyik
         };
       });
 
-      return std::move(future);
+      return future;
     }
 
     void set_default_log_severity(log_severity s)
@@ -134,7 +134,7 @@ namespace asyik
         };
       });
 
-      return std::move(future);
+      return future;
     };
 
     void run();

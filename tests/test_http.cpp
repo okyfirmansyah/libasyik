@@ -1,6 +1,6 @@
-#include "catch2/catch.hpp"
-#include "libasyik/service.hpp"
 #include "libasyik/http.hpp"
+#include "libasyik/service.hpp"
+#include "catch2/catch.hpp"
 
 namespace asyik
 {
@@ -641,7 +641,7 @@ namespace asyik
             prom.set_exception(
                 std::make_exception_ptr(asyik::network_error("send error")));
         });
-    return std::move(future);
+    return future;
   }
 
   TEST_CASE("test manual handling of http requests", "[http]")
@@ -704,7 +704,7 @@ namespace asyik
       }
 
       LOG(INFO)<<"performing client requests from inside async()..\n";
-      std::atomic<int> counter = 0;
+      std::atomic<int> counter{0};
       for(int i=0;i<50;i++)
       {
         as->async([as, &counter]()
