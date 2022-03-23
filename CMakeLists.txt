@@ -21,7 +21,6 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
 target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
-target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME})
 
 install(
   TARGETS ${PROJECT_NAME}
