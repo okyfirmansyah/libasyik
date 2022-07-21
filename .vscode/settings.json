@@ -1,5 +1,4 @@
 {
-    "clang-format.executable": "clang-format",
     "cmake.configureSettings": {
         "BUILD_INTERCHANGE": "ON",
         "BUILD_SERVER": "ON",
@@ -73,6 +72,20 @@
         "typeindex": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "*.ipp": "cpp"
+        "*.ipp": "cpp",
+        "any": "cpp",
+        "filesystem": "cpp",
+        "cfenv": "cpp",
+        "bit": "cpp",
+        "shared_mutex": "cpp"
+    },
+    "editor.formatOnSave": true,
+    "clang-format.style": "file",
+    "clang-format.language.cpp.enable": true,
+    "[cpp]": {
+        "editor.defaultFormatter": "xaver.clang-format",
+        "editor.wordBasedSuggestions": false,
+        "editor.suggest.insertMode": "replace",
+        "editor.semanticHighlighting.enabled": true
     }
 }

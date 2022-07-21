@@ -1,9 +1,9 @@
 #define CATCH_CONFIG_MAIN
 #include "catch2/catch.hpp"
-#include "libasyik/service.hpp"
 #include "libasyik/http.hpp"
-#include "libasyik/sql.hpp"
 #include "libasyik/memcache.hpp"
+#include "libasyik/service.hpp"
+#include "libasyik/sql.hpp"
 
 using namespace asyik;
 
