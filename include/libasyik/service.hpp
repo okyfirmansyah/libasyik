@@ -133,10 +133,11 @@ class service : public std::enable_shared_from_this<service> {
   void stop()
   {
     execute([i = &io_service, s = &stopped]() {
-      i->stop();
       *s = true;
+      std::move(i);
     });
   };
+  bool is_stopped() { return stopped; }
 
   boost::asio::io_context& get_io_service() { return io_service; };
   static void terminate();

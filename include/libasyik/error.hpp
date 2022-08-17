@@ -32,6 +32,8 @@ ASYIK_DEFINE_RUNTIME_ERROR(already_closed_error, std::runtime_error);
 ASYIK_DEFINE_RUNTIME_ERROR(already_exists_error, std::runtime_error);
 ASYIK_DEFINE_RUNTIME_ERROR(timeout_error, std::runtime_error);
 
+ASYIK_DEFINE_RUNTIME_ERROR(service_terminated_error, std::runtime_error);
+
 }  // namespace asyik
 
 #endif
