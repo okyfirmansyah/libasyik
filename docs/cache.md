@@ -32,7 +32,7 @@ as->execute([cache, as]()
   REQUIRE(cache->get("1")==1); // "1" will stil valid, as it prolonged by get()
   REQUIRE(cache->get("3")==3); // "3" will still valid too
   
-  auto i = cache->at("2"); // expired, will throw exception
+  auto i = cache->at("2"); // expired, will throw std::out_of_range exception
 });
 
 as->run();
