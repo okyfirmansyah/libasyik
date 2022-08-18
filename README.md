@@ -119,6 +119,7 @@ void some_handler(asyik::service_ptr as)
    - [HTTP/Websocket](docs/http.md)
    - [SOCI/SQL](docs/sql.md)
    - [Internal KV Cache](docs/cache.md)
+   - [Leaky Bucket Rate Limiter](docs/rate_limit.md)
  - Design/Rationale
    - [Why Fiber?](docs/why.md)
    - [Multithreading approach in Libasyik ](docs/designs.md)
