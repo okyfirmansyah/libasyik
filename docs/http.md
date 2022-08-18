@@ -247,6 +247,44 @@ int main()
 }
 ```
 
+#### Apply Rate Limiter to HTTP API
+We can use Libasyik's implementation of [leaky bucket](rate_limit.md) algorithm:
+```c++
+#include "libasyik/service.hpp"
+#include "libasyik/http.hpp"
+#include "libasyik/rate_limit.hpp"
+
+void main()
+{
+    auto as = asyik::make_service();
+    auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
+    
+    const int quota_burst = 10;   // capacity for allow initial requests burst(bucket size)
+    const int desired_qps = 30;   // steady state maximum qps
+
+    auto limiter = asyik::make_rate_limit_memory(as, quota_burst, desired_qps);
+
+    // accept string argument
+    server->on_http_request("/user_info/<string>", "GET", [limiter](auto req, auto args)
+    {
+      // this will apply rate limit per API and per User:
+      std::string limiter_bucket = "user_info_"+args[1];
+      
+      if(limiter->checkpoint(limiter_bucket))
+      {
+        req->response.body = "Ok";
+        req->response.result(200);
+      }else
+      {
+        req->response.body = "Too many requests!";
+        req->response.result(429);
+      }
+    });
+    
+    as->run();
+  }
+```
+
 #### Advanced Topic: Handle HTTP Connection and Its Responses Manually
 Sometimes we want to do something different that simple HTTP request and response, one use case is doing server side event stream(SSE) so the client can have mutiple datas/events, transmitted in realtime and on a single, long connection.
 

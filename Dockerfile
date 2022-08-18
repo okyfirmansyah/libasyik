@@ -8,7 +8,7 @@ RUN apt-get -y update && \
     apt-get -y upgrade && \
     apt-get -y dist-upgrade && \
     apt-get -y autoremove && \
-    apt-get install -y build-essential gdb wget git libssl-dev && \
+    apt-get install -y build-essential gdb wget git libssl-dev clang-format && \
     mkdir ~/temp && cd ~/temp && \
     wget https://github.com/Kitware/CMake/releases/download/v3.21.4/cmake-3.21.4.tar.gz && \
     tar -zxvf cmake-3.21.4.tar.gz && \
