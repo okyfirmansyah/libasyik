@@ -3,6 +3,7 @@
 
 #include <any>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/any.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
@@ -158,7 +159,7 @@ class http_server
   http_connection_ptr<stream_type> get_request_connection(const Req& req)
   {
     auto p =
-        std::any_cast<http_connection_wptr<stream_type>>(req.connection_wptr);
+        boost::any_cast<http_connection_wptr<stream_type>>(req.connection_wptr);
     if (auto connection = p.lock()) {
       return connection;
     }
@@ -357,7 +358,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
  private:
   boost::beast::flat_buffer buffer;
   bool manual_response;
-  std::any connection_wptr;
+  boost::any connection_wptr;
 
   template <typename StreamType>
   friend class http_server;
