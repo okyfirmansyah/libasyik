@@ -458,7 +458,7 @@ class websocket_impl : public websocket {
   virtual size_t read_basic_buffer(std::vector<uint8_t>& b)
   {
     // auto buffer = asio::dynamic_buffer(b);
-    asio::mutable_buffer_1 mb(b.data(), b.size());
+    asio::mutable_buffers_1 mb(b.data(), b.size());
     auto buffer = beast::buffers_adaptor<asio::mutable_buffers_1>(mb);
 
     return internal::websocket::async_read(*ws, buffer).get();
