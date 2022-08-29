@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
-add_subdirectory(src)
+SET(CMAKE_CXX_STANDARD 11)
+
 add_subdirectory(tests)
 add_subdirectory(external/Catch2)
+add_subdirectory(src)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

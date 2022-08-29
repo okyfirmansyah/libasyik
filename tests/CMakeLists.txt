@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik_test)
 
-set(CMAKE_CXX_STANDARD 14)
 SET(GCC_COVERAGE_COMPILE_FLAGS "-g -O0 -coverage -fprofile-arcs -ftest-coverage")
 SET(GCC_COVERAGE_LINK_FLAGS    "-coverage -lgcov")
 SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Werror=return-type -Wno-unused-variable")

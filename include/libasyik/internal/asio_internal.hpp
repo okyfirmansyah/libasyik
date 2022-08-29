@@ -19,7 +19,7 @@ namespace asyik {
 namespace internal {
 namespace socket {
 template <typename... Args>
-auto async_read(Args&&... args)
+auto async_read(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -41,7 +41,7 @@ auto async_read(Args&&... args)
 };
 
 template <typename... Args>
-auto async_write(Args&&... args)
+auto async_write(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -63,7 +63,7 @@ auto async_write(Args&&... args)
 };
 
 template <typename... Args>
-auto async_read_until(Args&&... args)
+auto async_read_until(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -85,7 +85,7 @@ auto async_read_until(Args&&... args)
 };
 
 template <typename T>
-auto async_timer_wait(T&& p)
+auto async_timer_wait(T&& p) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();
@@ -100,6 +100,7 @@ auto async_timer_wait(T&& p)
 
 template <typename Resolver, typename... Args>
 auto async_resolve(Resolver& res, Args&&... args)
+    -> boost::fibers::future<tcp::resolver::results_type>
 {
   boost::fibers::promise<tcp::resolver::results_type> promise;
   auto future = promise.get_future();
@@ -123,6 +124,7 @@ auto async_resolve(Resolver& res, Args&&... args)
 
 template <typename Conn, typename... Args>
 auto async_connect(Conn& con, Args&&... args)
+    -> boost::fibers::future<tcp::resolver::results_type::endpoint_type>
 {
   boost::fibers::promise<tcp::resolver::results_type::endpoint_type> promise;
   auto future = promise.get_future();
@@ -148,7 +150,7 @@ auto async_connect(Conn& con, Args&&... args)
 
 namespace http {
 template <typename... Args>
-auto async_read(Args&&... args)
+auto async_read(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -176,7 +178,7 @@ auto async_read(Args&&... args)
 };
 
 template <typename... Args>
-auto async_write(Args&&... args)
+auto async_write(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -200,7 +202,7 @@ auto async_write(Args&&... args)
 
 namespace ssl {
 template <typename Conn, typename... Args>
-auto async_handshake(Conn& con, Args&&... args)
+auto async_handshake(Conn& con, Args&&... args) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();
@@ -223,7 +225,7 @@ auto async_handshake(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_shutdown(Conn& con, Args&&... args)
+auto async_shutdown(Conn& con, Args&&... args) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();
@@ -248,7 +250,7 @@ auto async_shutdown(Conn& con, Args&&... args)
 
 namespace websocket {
 template <typename Conn, typename... Args>
-auto async_read(Conn& con, Args&&... args)
+auto async_read(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -271,7 +273,7 @@ auto async_read(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_read_some(Conn& con, Args&&... args)
+auto async_read_some(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -294,7 +296,7 @@ auto async_read_some(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_write(Conn& con, Args&&... args)
+auto async_write(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;
   auto future = promise.get_future();
@@ -317,7 +319,7 @@ auto async_write(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_accept(Conn& con, Args&&... args)
+auto async_accept(Conn& con, Args&&... args) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();
@@ -340,7 +342,7 @@ auto async_accept(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_handshake(Conn& con, Args&&... args)
+auto async_handshake(Conn& con, Args&&... args) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();
@@ -363,7 +365,7 @@ auto async_handshake(Conn& con, Args&&... args)
 }
 
 template <typename Conn, typename... Args>
-auto async_close(Conn& con, Args&&... args)
+auto async_close(Conn& con, Args&&... args) -> boost::fibers::future<void>
 {
   boost::fibers::promise<void> promise;
   auto future = promise.get_future();

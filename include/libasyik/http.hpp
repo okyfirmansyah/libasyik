@@ -190,9 +190,7 @@ class http_server
                           std::string s{req.target()};
                           if (std::regex_search(s, m, std::get<1>(tuple))) {
                             a.clear();
-                            std::for_each(m.begin(), m.end(), [&a](auto item) {
-                              a.push_back(item.str());
-                            });
+                            for (const auto& item : m) a.push_back(item.str());
                             return true;
                           } else
                             return false;
@@ -326,6 +324,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
 
   template <typename S>
   inline auto get_connection_handle(S server)
+      -> decltype(server->get_request_connection(*this))
   {
     return server->get_request_connection(*this);
   }
@@ -524,9 +523,7 @@ http_request_ptr http_easy_request(
     req->headers.set("Content-Type", "text/html");
 
     // user-overidden headers
-    std::for_each(headers.cbegin(), headers.cend(), [&req](const auto& item) {
-      req->headers.set(item.first, item.second);
-    });
+    for (const auto& item : headers) req->headers.set(item.first, item.second);
 
     req->body = std::forward<D>(data);
     req->method(method);

@@ -60,8 +60,9 @@ sql_pool_ptr make_sql_pool(F&& factory, C&& connectString, size_t num_pool)
 
   for (size_t i = 0; i < num_pool; i++) {
     std::lock_guard<fibers::mutex> l(p->mtx_);
-    auto s = std::make_unique<soci::session>(std::forward<F>(factory),
-                                             std::forward<C>(connectString));
+
+    std::unique_ptr<soci::session> s(new soci::session(
+        std::forward<F>(factory), std::forward<C>(connectString)));
     p->soci_sessions.push_back(std::move(s));
   };
 
@@ -90,8 +91,9 @@ sql_pool_ptr make_sql_pool(F&& factory, C&& connectString, size_t num_pool)
               try {
                 LOG(WARNING) << "health check failed: " << e.what()
                              << "\nrenew SOCI session...\n";
-                auto s = std::make_unique<soci::session>(std::forward<F>(f),
-                                                         connectString);
+
+                std::unique_ptr<soci::session> s(
+                    new soci::session(std::forward<F>(f), connectString));
                 l.lock();
                 p->soci_sessions.push_back(std::move(s));
               } catch (std::exception& e) {

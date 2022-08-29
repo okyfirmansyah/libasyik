@@ -92,6 +92,17 @@ void main()
 }
 ```
 
+If you're using C++11 that does not support auto in lambda:
+```c++
+using namespace asyik;
+
+server->on_websocket("/websocket", [](websocket_ptr ws, const http_route_args& args) 
+{ };
+
+server->on_http_request("/name/<string>", "GET", [](http_request_ptr req, const http_route_args& args)
+{ };
+```
+
 #### SQL Database
 ```c++
 #include "libasyik/sql.hpp"
@@ -130,7 +141,7 @@ void some_handler(asyik::service_ptr as)
 
 ### Requirements
 
- - C++ compiler with good C++17 support (tested with GCC 7.5.0)
+ - C++ compiler with >=C++11 support (C++14 or C++17 is recommended, tested with GCC 7.5.0)
  - Boost library with Boost::context, Boost::fiber, and Boost::asio(Boost version 1.70.0 or above recommended)
  - CMake > 3.12
  - SOCI with SQLite and PostgreSQL backend and required low level libraries
@@ -156,7 +167,7 @@ As example use following CMakeLists.txt template to invoke Libasyik using **find
 ```
 cmake_minimum_required(VERSION 3.14)
 project(test_asyik)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 11)  #set to 14 or 17 when available
 
 add_executable(${PROJECT_NAME} test.cpp) # add more source code here
 

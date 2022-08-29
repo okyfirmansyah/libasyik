@@ -69,11 +69,13 @@ TEST_CASE("Testing basic of memcache")
   // try creating memcache for movable only items
   auto cache2 =
       asyik::make_memcache<std::string, std::unique_ptr<std::string>, 1>(as);
-  cache2->put("1", std::move(std::make_unique<std::string>("test")));
+  cache2->put("1",
+              std::move(std::unique_ptr<std::string>(new std::string("test"))));
   LOG(INFO) << "test priontout cache2:" << *(cache2->at("1")) << "\n";
   REQUIRE(!strcmp("test", cache2->at("1")->c_str()));
   asyik::sleep_for(std::chrono::milliseconds(500));
-  cache2->put("1", std::move(std::make_unique<std::string>("test2")));
+  cache2->put(
+      "1", std::move(std::unique_ptr<std::string>(new std::string("test2"))));
   LOG(INFO) << "test priontout cache2:" << *(cache2->at("1")) << "\n";
   REQUIRE(!strcmp("test2", cache2->get("1")->c_str()));
   LOG(INFO) << "test priontout cache2:" << *(cache2->at("1")) << "\n";
