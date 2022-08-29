@@ -164,12 +164,21 @@ TEST_CASE("execute async", "[service]")
         },
         10)
       .get();
+#if __cplusplus >= 201402L
   as->async(
       [](auto& i) -> void {
         usleep(0);
         i++;
       },
       i);
+#else
+  as->async(
+      [](std::atomic<int>& i) -> void {
+        usleep(0);
+        i++;
+      },
+      i);
+#endif
   as->async(
         [&i](string_view s, const std::string s2) -> void {
           usleep(130);

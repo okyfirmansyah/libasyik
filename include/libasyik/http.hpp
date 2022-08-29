@@ -3,6 +3,7 @@
 
 #include <any>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/any.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
@@ -158,7 +159,7 @@ class http_server
   http_connection_ptr<stream_type> get_request_connection(const Req& req)
   {
     auto p =
-        std::any_cast<http_connection_wptr<stream_type>>(req.connection_wptr);
+        boost::any_cast<http_connection_wptr<stream_type>>(req.connection_wptr);
     if (auto connection = p.lock()) {
       return connection;
     }
@@ -189,9 +190,7 @@ class http_server
                           std::string s{req.target()};
                           if (std::regex_search(s, m, std::get<1>(tuple))) {
                             a.clear();
-                            std::for_each(m.begin(), m.end(), [&a](auto item) {
-                              a.push_back(item.str());
-                            });
+                            for (const auto& item : m) a.push_back(item.str());
                             return true;
                           } else
                             return false;
@@ -325,6 +324,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
 
   template <typename S>
   inline auto get_connection_handle(S server)
+      -> decltype(server->get_request_connection(*this))
   {
     return server->get_request_connection(*this);
   }
@@ -357,7 +357,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
  private:
   boost::beast::flat_buffer buffer;
   bool manual_response;
-  std::any connection_wptr;
+  boost::any connection_wptr;
 
   template <typename StreamType>
   friend class http_server;
@@ -457,8 +457,8 @@ class websocket_impl : public websocket {
   virtual size_t read_basic_buffer(std::vector<uint8_t>& b)
   {
     // auto buffer = asio::dynamic_buffer(b);
-    asio::mutable_buffer mb(b.data(), b.size());
-    auto buffer = beast::buffers_adaptor(mb);
+    asio::mutable_buffers_1 mb(b.data(), b.size());
+    auto buffer = beast::buffers_adaptor<asio::mutable_buffers_1>(mb);
 
     return internal::websocket::async_read(*ws, buffer).get();
   }
@@ -523,9 +523,7 @@ http_request_ptr http_easy_request(
     req->headers.set("Content-Type", "text/html");
 
     // user-overidden headers
-    std::for_each(headers.cbegin(), headers.cend(), [&req](const auto& item) {
-      req->headers.set(item.first, item.second);
-    });
+    for (const auto& item : headers) req->headers.set(item.first, item.second);
 
     req->body = std::forward<D>(data);
     req->method(method);

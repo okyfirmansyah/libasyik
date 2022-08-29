@@ -138,7 +138,12 @@ TEST_CASE("Create http server and client, do some websocket communications",
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
+#if __cplusplus >= 201402L
   server->on_websocket("/<int>/name/<string>", [](auto ws, auto args) {
+#else
+  server->on_websocket("/<int>/name/<string>",
+                       [](websocket_ptr ws, const http_route_args& args) {
+#endif
     ws->set_idle_timeout(2);
     ws->set_keepalive_pings(true);
 
@@ -255,7 +260,8 @@ TEST_CASE("Create http server and client, do some http communications",
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
-  server->on_websocket("/<int>/test/<string>", [](auto ws, auto args) {
+  server->on_websocket("/<int>/test/<string>", [](websocket_ptr ws,
+                                                  const http_route_args& args) {
     ws->send_string(args[1]);
     ws->send_string(args[2]);
 
@@ -266,7 +272,12 @@ TEST_CASE("Create http server and client, do some http communications",
   });
 
   server->on_http_request(
-      "/post-only/<int>/name/<string>", "POST", [](auto req, auto args) {
+      "/post-only/<int>/name/<string>", "POST",
+#if __cplusplus >= 201402L
+      [](auto req, auto args) {
+#else
+      [](http_request_ptr req, const http_route_args& args) {
+#endif
         req->response.headers.set("x-test-reply", "amiiin");
         req->response.headers.set("content-type", "text/json");
         std::string x_test{req->headers["x-test"]};
@@ -275,21 +286,23 @@ TEST_CASE("Create http server and client, do some http communications",
         req->response.result(200);
       });
 
-  server->on_http_request("/any/<int>/", [](auto req, auto args) {
-    req->response.headers.set("x-test-reply", "amiin");
-    req->response.headers.set("content-type", "text/json");
-    std::string s{req->method()};
-    std::string x_test{req->headers["x-test"]};
-    req->response.body = req->body + "-" + s + "-" + args[1] + "-" + x_test;
-    req->response.result(200);
-  });
+  server->on_http_request(
+      "/any/<int>/", [](http_request_ptr req, const http_route_args& args) {
+        req->response.headers.set("x-test-reply", "amiin");
+        req->response.headers.set("content-type", "text/json");
+        std::string s{req->method()};
+        std::string x_test{req->headers["x-test"]};
+        req->response.body = req->body + "-" + s + "-" + args[1] + "-" + x_test;
+        req->response.result(200);
+      });
 
-  server->on_http_request("/big_size/", [](auto req, auto args) {
-    REQUIRE(req->body.size() ==
-            std::stoull(std::string(req->headers["Content-Length"])));
-    LOG(INFO) << "HTTP payload with big size received successfully\n";
-    req->response.result(200);
-  });
+  server->on_http_request(
+      "/big_size/", [](http_request_ptr req, const http_route_args& args) {
+        REQUIRE(req->body.size() ==
+                std::stoull(std::string(req->headers["Content-Length"])));
+        LOG(INFO) << "HTTP payload with big size received successfully\n";
+        req->response.result(200);
+      });
 
   server->set_request_body_limit(20 * 1024 * 1024);
   server->set_request_header_limit(1024);
@@ -402,12 +415,13 @@ TEST_CASE("Test http client timeout", "[http]")
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
 
-  server->on_http_request("/timeout", [](auto req, auto args) {
-    asyik::sleep_for(std::chrono::seconds(5));
+  server->on_http_request(
+      "/timeout", [](http_request_ptr req, const http_route_args& args) {
+        asyik::sleep_for(std::chrono::seconds(5));
 
-    req->response.body = "ok";
-    req->response.result(200);
-  });
+        req->response.body = "ok";
+        req->response.result(200);
+      });
 
   asyik::sleep_for(std::chrono::milliseconds(100));
   as->execute([as]() {
@@ -522,15 +536,17 @@ TEST_CASE("Create https server and client, do some https communications",
 
   auto server = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4004);
 
-  server->on_websocket("/ws", [](auto ws, auto args) {
-    auto s = ws->get_string();
-    ws->send_string(s);
+  server->on_websocket(
+      "/ws", [](websocket_ptr ws, const http_route_args& args) {
+        auto s = ws->get_string();
+        ws->send_string(s);
 
-    ws->close(websocket_close_code::normal, "closed normally");
-  });
+        ws->close(websocket_close_code::normal, "closed normally");
+      });
 
   server->on_http_request(
-      "/post-only/<int>/name/<string>", "POST", [](auto req, auto args) {
+      "/post-only/<int>/name/<string>", "POST",
+      [](http_request_ptr req, const http_route_args& args) {
         req->response.headers.set("x-test-reply", "amiiin");
         req->response.headers.set("content-type", "text/json");
 
@@ -540,19 +556,21 @@ TEST_CASE("Create https server and client, do some https communications",
         req->response.result(200);
       });
 
-  server->on_http_request("/timeout", [](auto req, auto args) {
-    asyik::sleep_for(std::chrono::seconds(5));
+  server->on_http_request(
+      "/timeout", [](http_request_ptr req, const http_route_args& args) {
+        asyik::sleep_for(std::chrono::seconds(5));
 
-    req->response.body = "ok";
-    req->response.result(200);
-  });
+        req->response.body = "ok";
+        req->response.result(200);
+      });
 
-  server->on_http_request("/big_size/", [](auto req, auto args) {
-    REQUIRE(req->body.size() ==
-            std::stoull(std::string(req->headers["Content-Length"])));
-    LOG(INFO) << "HTTP payload with big size received successfully\n";
-    req->response.result(200);
-  });
+  server->on_http_request(
+      "/big_size/", [](http_request_ptr req, const http_route_args& args) {
+        REQUIRE(req->body.size() ==
+                std::stoull(std::string(req->headers["Content-Length"])));
+        LOG(INFO) << "HTTP payload with big size received successfully\n";
+        req->response.result(200);
+      });
 
   server->set_request_body_limit(20 * 1024 * 1024);
   server->set_request_header_limit(1024);
@@ -651,7 +669,7 @@ TEST_CASE("Create https server and client, do some https communications",
 }
 
 template <typename Conn, typename... Args>
-auto async_send(Conn& con, Args&&... args)
+auto async_send(Conn& con, Args&&... args) -> boost::fibers::future<std::size_t>
 {
   boost::fibers::promise<std::size_t> promise;
   auto future = promise.get_future();
@@ -683,41 +701,45 @@ TEST_CASE("test manual handling of http requests", "[http]")
   auto server2 =
       asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4008);
 
-  server->on_http_request("/manual", "GET", [server](auto req, auto args) {
-    auto connection = req->get_connection_handle(server);
-    auto& stream = connection->get_stream();
-    req->activate_direct_response_handling();
+  server->on_http_request(
+      "/manual", "GET",
+      [server](http_request_ptr req, const http_route_args& args) {
+        auto connection = req->get_connection_handle(server);
+        auto& stream = connection->get_stream();
+        req->activate_direct_response_handling();
 
-    std::string body{req->headers["x-test"]};
-    std::string s =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-type: text/plain\r\n"
-        "X-Test-Reply: amiiin\r\n"
-        "Content-length: " +
-        std::to_string(body.length()) + "\r\n\r\n";
+        std::string body{req->headers["x-test"]};
+        std::string s =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-type: text/plain\r\n"
+            "X-Test-Reply: amiiin\r\n"
+            "Content-length: " +
+            std::to_string(body.length()) + "\r\n\r\n";
 
-    async_send(stream, asio::buffer(s.data(), s.length())).get();
-    async_send(stream, asio::buffer(body.data(), body.length())).get();
-  });
+        async_send(stream, asio::buffer(s.data(), s.length())).get();
+        async_send(stream, asio::buffer(body.data(), body.length())).get();
+      });
 
-  server2->on_http_request("/manual", "GET", [server2](auto req, auto args) {
-    auto connection = req->get_connection_handle(server2);
-    auto& stream = connection->get_stream();
-    req->activate_direct_response_handling();
+  server2->on_http_request(
+      "/manual", "GET",
+      [server2](http_request_ptr req, const http_route_args& args) {
+        auto connection = req->get_connection_handle(server2);
+        auto& stream = connection->get_stream();
+        req->activate_direct_response_handling();
 
-    std::string body{req->headers["x-test"]};
-    std::string s =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-type: text/plain\r\n"
-        "X-Test-Reply: amiiin\r\n"
-        "Content-length: " +
-        std::to_string(body.length()) + "\r\n\r\n";
+        std::string body{req->headers["x-test"]};
+        std::string s =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-type: text/plain\r\n"
+            "X-Test-Reply: amiiin\r\n"
+            "Content-length: " +
+            std::to_string(body.length()) + "\r\n\r\n";
 
-    asyik::sleep_for(std::chrono::milliseconds(50));
+        asyik::sleep_for(std::chrono::milliseconds(50));
 
-    async_send(stream, asio::buffer(s.data(), s.length())).get();
-    async_send(stream, asio::buffer(body.data(), body.length())).get();
-  });
+        async_send(stream, asio::buffer(s.data(), s.length())).get();
+        async_send(stream, asio::buffer(body.data(), body.length())).get();
+      });
 
   asyik::sleep_for(std::chrono::milliseconds(100));
   as->execute([as]() {
@@ -773,49 +795,50 @@ TEST_CASE("Test websocket binary", "[http]")
   std::vector<uint8_t> buff;
   for (int i = 0; i < 1024; i++) buff.push_back((uint8_t)rand() % 256);
 
-  server->on_websocket("/binary_test", [&buff](auto ws, auto args) {
-    try {
-      auto s = ws->get_string();
-      REQUIRE(!s.compare("this is text"));
+  server->on_websocket(
+      "/binary_test", [&buff](websocket_ptr ws, const http_route_args& args) {
+        try {
+          auto s = ws->get_string();
+          REQUIRE(!s.compare("this is text"));
 
-      std::vector<uint8_t> b;
-      b.resize(1024);
-      ws->read_basic_buffer(b);
-      REQUIRE(b == buff);
+          std::vector<uint8_t> b;
+          b.resize(1024);
+          ws->read_basic_buffer(b);
+          REQUIRE(b == buff);
 
-      auto s2 = ws->get_string();
-      REQUIRE(!s2.compare("again, this is text"));
+          auto s2 = ws->get_string();
+          REQUIRE(!s2.compare("again, this is text"));
 
-      try {
-        auto s3 = ws->get_string();
-        REQUIRE(false);
-      } catch (asyik::unexpected_error& e) {
-        LOG(INFO) << "catch exception because we got binary when we're "
-                     "actually expect text(expected)\n";
-      }
+          try {
+            auto s3 = ws->get_string();
+            REQUIRE(false);
+          } catch (asyik::unexpected_error& e) {
+            LOG(INFO) << "catch exception because we got binary when we're "
+                         "actually expect text(expected)\n";
+          }
 
-      auto s3 = ws->get_string();
-      REQUIRE(!s3.compare("third, this is text"));
+          auto s3 = ws->get_string();
+          REQUIRE(!s3.compare("third, this is text"));
 
-      std::vector<uint8_t> b2;
-      b2.resize(2048);
-      auto sz = ws->read_basic_buffer(b2);
-      b2.resize(sz);  // change actual resulting output buffer size
-      REQUIRE(b2 == buff);
+          std::vector<uint8_t> b2;
+          b2.resize(2048);
+          auto sz = ws->read_basic_buffer(b2);
+          b2.resize(sz);  // change actual resulting output buffer size
+          REQUIRE(b2 == buff);
 
-      try {
-        std::vector<uint8_t> b;
-        b.resize(512);
-        ws->read_basic_buffer(b);
-        REQUIRE(false);
-      } catch (asyik::network_error& e) {
-        LOG(INFO) << "got exception: " << e.what() << "(expected)\n";
-      }
-    } catch (...) {
-      LOG(INFO) << "got unexpected exception in handler binary_test\n";
-      REQUIRE(false);
-    }
-  });
+          try {
+            std::vector<uint8_t> b;
+            b.resize(512);
+            ws->read_basic_buffer(b);
+            REQUIRE(false);
+          } catch (asyik::network_error& e) {
+            LOG(INFO) << "got exception: " << e.what() << "(expected)\n";
+          }
+        } catch (...) {
+          LOG(INFO) << "got unexpected exception in handler binary_test\n";
+          REQUIRE(false);
+        }
+      });
 
   // check ws client timeout
   as->execute([as, &buff]() {

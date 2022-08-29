@@ -1,17 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
-set(CMAKE_CXX_STANDARD 17)
-SET(GCC_COVERAGE_COMPILE_FLAGS "-g -O0 -coverage -fprofile-arcs -ftest-coverage")
-SET(GCC_COVERAGE_LINK_FLAGS    "-coverage -lgcov")
-SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Werror=return-type -Wno-unused-variable")
-SET(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} ${GCC_COVERAGE_COMPILE_FLAGS}" )
-SET(CMAKE_EXE_LINKER_FLAGS_DEBUG  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} ${GCC_COVERAGE_LINK_FLAGS}" )
+SET(CMAKE_CXX_STANDARD 11)
 
-
-add_subdirectory(src)
 add_subdirectory(tests)
 add_subdirectory(external/Catch2)
+add_subdirectory(src)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

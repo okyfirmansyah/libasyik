@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik_test)
 
-set(CMAKE_CXX_STANDARD 17)
+SET(GCC_COVERAGE_COMPILE_FLAGS "-g -O0 -coverage -fprofile-arcs -ftest-coverage")
+SET(GCC_COVERAGE_LINK_FLAGS    "-coverage -lgcov")
+SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Werror=return-type -Wno-unused-variable")
+SET(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} ${GCC_COVERAGE_COMPILE_FLAGS}" )
+SET(CMAKE_EXE_LINKER_FLAGS_DEBUG  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} ${GCC_COVERAGE_LINK_FLAGS}" )
 
 add_executable(${PROJECT_NAME} test.cpp test_http.cpp test_service.cpp test_sql.cpp test_memcache.cpp test_rate_limit.cpp)
 
