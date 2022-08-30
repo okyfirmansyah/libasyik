@@ -1,7 +1,6 @@
 #ifndef LIBASYIK_ASYIK_HTTP_HPP
 #define LIBASYIK_ASYIK_HTTP_HPP
 
-#include <any>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/any.hpp>
 #include <boost/asio/ssl/error.hpp>
