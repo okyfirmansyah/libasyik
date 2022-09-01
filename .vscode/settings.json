@@ -4,6 +4,7 @@
         "BUILD_SERVER": "ON",
         "BUILD_EXAMPLE": "ON",
         "BUILD_PROMETHEUS": "ON",
+        "CMAKE_CXX_STANDARD": 11,
         "-j": "6"
     },
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",

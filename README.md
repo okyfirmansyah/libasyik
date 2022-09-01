@@ -167,13 +167,15 @@ As example use following CMakeLists.txt template to invoke Libasyik using **find
 ```
 cmake_minimum_required(VERSION 3.14)
 project(test_asyik)
-set(CMAKE_CXX_STANDARD 11)  #set to 14 or 17 when available
+SET(LIBASYIK_ENABLE_SOCI ON)  # if SOCI database support is desired
+set(CMAKE_CXX_STANDARD 11)    # set to 14 or 17 when available
 
 add_executable(${PROJECT_NAME} test.cpp) # add more source code here
 
 #######
 #include other dependencies
 #######
+
 find_package(libasyik)
 if(libasyik_FOUND)
     target_include_directories(${PROJECT_NAME} PUBLIC ${libasyik_INCLUDE_DIR})
@@ -186,8 +188,7 @@ if(Boost_FOUND)
     target_link_libraries(${PROJECT_NAME} Boost::fiber Boost::context)
 endif()
 
-
-find_package(SOCI REQUIRED)
+find_package(SOCI REQUIRED) # if SOCI database support is desired
 if(SOCI_FOUND)
     target_include_directories(${PROJECT_NAME} PUBLIC /usr/include/postgresql)
     target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci)

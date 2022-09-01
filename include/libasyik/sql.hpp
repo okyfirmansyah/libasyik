@@ -66,7 +66,7 @@ sql_pool_ptr make_sql_pool(F&& factory, C&& connectString, size_t num_pool)
     p->soci_sessions.push_back(std::move(s));
   };
 
-  std::thread th([w = sql_pool_wptr(p), f = std::forward<F>(factory),
+  std::thread th([w = sql_pool_wptr(p), &f = std::forward<F>(factory),
                   connectString = std::string{connectString}]() {
     int i = 0;
     while (true) {
@@ -113,7 +113,7 @@ sql_pool_ptr make_sql_pool(F&& factory, C&& connectString, size_t num_pool)
   th.detach();
 
   return p;
-}
+}  // namespace asyik
 
 class sql_session : public std::enable_shared_from_this<sql_session> {
  private:

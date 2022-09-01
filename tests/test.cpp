@@ -4,7 +4,9 @@
 #include "libasyik/memcache.hpp"
 #include "libasyik/rate_limit.hpp"
 #include "libasyik/service.hpp"
+#ifdef LIBASYIK_SOCI_ENABLE
 #include "libasyik/sql.hpp"
+#endif
 
 using namespace asyik;
 
@@ -14,7 +16,9 @@ TEST_CASE("Invoke all test units", "[asyik]")
 {
   _TEST_invoke_service();
   _TEST_invoke_http();
+#ifdef LIBASYIK_SOCI_ENABLE
   _TEST_invoke_sql();
+#endif
 
   _TEST_invoke_memcache();
   _TEST_invoke_rate_limit();

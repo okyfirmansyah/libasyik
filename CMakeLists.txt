@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
-SET(CMAKE_CXX_STANDARD 11)
+SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
 
 add_subdirectory(tests)
 add_subdirectory(external/Catch2)
@@ -15,6 +15,8 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
 target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
+
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 
 install(
   TARGETS ${PROJECT_NAME}
