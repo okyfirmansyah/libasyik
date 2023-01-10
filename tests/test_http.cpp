@@ -869,18 +869,20 @@ TEST_CASE("Test http url view", "[http_url_view]")
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
 
-  server->on_http_request("/name/<string>", "GET", [](auto req, auto args) {
-    req->response.headers.set("x-test-reply", "amiiin");
-    req->response.headers.set("content-type", "text/json");
+  server->on_http_request(
+      "/name/<string>", "GET",
+      [](http_request_ptr req, const http_route_args& args) {
+        req->response.headers.set("x-test-reply", "amiiin");
+        req->response.headers.set("content-type", "text/json");
 
-    auto uv = req->get_url_view();
-    std::string params = "-";
-    for (auto x : uv.params()) {
-      params += x.key + "=" + x.value + ",";
-    }
-    req->response.body = "GET-" + args[1] + params;
-    req->response.result(200);
-  });
+        auto uv = req->get_url_view();
+        std::string params = "-";
+        for (auto x : uv.params()) {
+          params += x.key + "=" + x.value + ",";
+        }
+        req->response.body = "GET-" + args[1] + params;
+        req->response.result(200);
+      });
 
   as->execute([as]() {
     auto req =
