@@ -40,7 +40,6 @@ static const size_t default_response_body_limit = 16 * 1024 * 1024;
 static const size_t default_response_header_limit = 1 * 1024 * 1024;
 
 using http_route_args = std::vector<std::string>;
-using http_query_param = std::map<std::string, std::string>;
 
 using http_beast_request =
     boost::beast::http::request<boost::beast::http::string_body>;
