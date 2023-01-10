@@ -9,6 +9,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/url.hpp>
 #include <regex>
 #include <string>
 
@@ -320,6 +321,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
   http_beast_request beast_request;
   http_request_headers& headers;
   http_request_body& body;
+  boost::urls::url_view uv;
 
   template <typename S>
   inline auto get_connection_handle(S server)
@@ -338,6 +340,10 @@ class http_request : public std::enable_shared_from_this<http_request> {
   {
     beast_request.method(beast::http::string_to_verb(verb));
   };
+
+  void set_url_view() { uv = boost::urls::url_view(target()); }
+
+  boost::urls::url_view& get_url_view() { return uv; }
 
   struct response {
     response()
@@ -660,6 +666,7 @@ void http_connection<StreamType>::start()
                 .get();
             req = req_parser.release();
 
+            asyik_req->set_url_view();
             // See if its a WebSocket upgrade request
             if (beast::websocket::is_upgrade(req)) {
               // Clients SHOULD NOT begin sending WebSocket

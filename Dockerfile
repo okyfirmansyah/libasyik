@@ -11,9 +11,9 @@ RUN apt-get -y update && \
     apt-get install -y build-essential gdb wget git libssl-dev clang-format && \
     mkdir ~/temp && cd ~/temp && \
     apt-get install -y cmake && \
-    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.73.0/boost_1_73_0.tar.gz && \
-    tar -zxvf boost_1_73_0.tar.gz && cd boost_1_73_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++11" --reconfigure --with-fiber --with-date_time install && \
-    cd ~/temp && git clone https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
+    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.81.0/boost_1_81_0.tar.gz && \
+    tar -zxvf boost_1_81_0.tar.gz && cd ~/temp/boost_1_81_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++11" --reconfigure --with-fiber --with-context --with-atomic --with-date_time --with-filesystem --with-url install && \
+    cd ~/temp && git clone -b v1.15 https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
     apt-get install -y libperlio-gzip-perl libjson-perl && \
     rm -rf ~/temp/* && \
     apt-get autoremove -y &&\
@@ -53,5 +53,5 @@ RUN if [ "$DOCKER_TYPE" = "TEST" ]; then \
     cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=11 .. && \
     make -j4 && \
     cp tests/libasyik_test  /usr/bin ; \
-  fi
-  
+    fi
+

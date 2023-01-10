@@ -411,3 +411,52 @@ auto s = ws->get_string();
 ```
 
 **note:** If the other end that expected to reply PING with PONG is also libasyik WebSocket(based on boost::beast), then the other end will have to be in the process of receiving data as well, otherwise the PONG will not be emitted.
+
+#### Extracting boost.url_view in http handler
+Boost.url_view extracts and organizes information from a given URL. This information includes the protocol (e.g. https), domain name (e.g. www.example.com), path (e.g. /products/category1), and query parameters (e.g. ?sort=price&filter=new).
+Additional resources: [Boost::Url](https://www.boost.org/doc/libs/master/libs/url/doc/html/url/overview.html#url.overview.quick_look.accessing)
+```c++
+#include "libasyik/service.hpp"
+#include "libasyik/http.hpp"
+
+int main()
+{
+  auto as = asyik::make_service();
+
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
+
+  server->on_http_request("/name/<string>", "GET", [](auto req, auto args) {
+    req->response.headers.set("x-test-reply", "amiiin");
+    req->response.headers.set("content-type", "text/json");
+
+    auto uv = req->get_url_view();
+    
+    for (auto x : uv.params()) {
+      LOG(INFO) << x.key << "=" << x.value << " ";
+    }
+    
+    req->response.body = "Hello " + args[1] + "!";
+    req->response.result(200);
+  });
+
+  as->execute([as]() {
+    auto req =
+        asyik::http_easy_request(as, "GET", "http://127.0.0.1:4006/name/999/");
+
+    assert(req->response.result() == 200);
+    assert(!req->response.body.compare("GET-999-"));
+    assert(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    req = asyik::http_easy_request(
+        as, "GET", "http://127.0.0.1:4006/name/999/?dummy1=2&dummy2=haha");
+
+    assert(req->response.result() == 200);
+    assert(!req->response.body.compare("GET-999-dummy1=2,dummy2=haha,"));
+    assert(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    as->stop();
+  });
+
+  as->run();
+}
+```
