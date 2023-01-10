@@ -7,10 +7,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../external/Catch2/include)
 
 # add the required libraries here
-find_package(Boost COMPONENTS context fiber date_time REQUIRED)
+find_package(Boost COMPONENTS context atomic fiber date_time url REQUIRED)
 if(Boost_FOUND)
     target_include_directories(${PROJECT_NAME} PUBLIC ${Boost_INCLUDE_DIR})
-    target_link_libraries(${PROJECT_NAME} Boost::fiber Boost::context Boost::date_time)
+    target_link_libraries(${PROJECT_NAME} Boost::fiber Boost::context Boost::date_time Boost::url)
 endif()
 
 if(LIBASYIK_ENABLE_SOCI)

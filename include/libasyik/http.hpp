@@ -9,6 +9,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/url.hpp>
 #include <regex>
 #include <string>
 
@@ -39,6 +40,7 @@ static const size_t default_response_body_limit = 16 * 1024 * 1024;
 static const size_t default_response_header_limit = 1 * 1024 * 1024;
 
 using http_route_args = std::vector<std::string>;
+using http_query_param = std::map<std::string, std::string>;
 
 using http_beast_request =
     boost::beast::http::request<boost::beast::http::string_body>;
@@ -320,6 +322,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
   http_beast_request beast_request;
   http_request_headers& headers;
   http_request_body& body;
+  boost::urls::url_view uv;
 
   template <typename S>
   inline auto get_connection_handle(S server)
@@ -338,6 +341,10 @@ class http_request : public std::enable_shared_from_this<http_request> {
   {
     beast_request.method(beast::http::string_to_verb(verb));
   };
+
+  void set_url_view() { uv = boost::urls::url_view(target()); }
+
+  boost::urls::url_view& get_url_view() { return uv; }
 
   struct response {
     response()
@@ -660,6 +667,7 @@ void http_connection<StreamType>::start()
                 .get();
             req = req_parser.release();
 
+            asyik_req->set_url_view();
             // See if its a WebSocket upgrade request
             if (beast::websocket::is_upgrade(req)) {
               // Clients SHOULD NOT begin sending WebSocket
