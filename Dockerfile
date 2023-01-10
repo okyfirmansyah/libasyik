@@ -13,7 +13,7 @@ RUN apt-get -y update && \
     apt-get install -y cmake && \
     cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.81.0/boost_1_81_0.tar.gz && \
     tar -zxvf boost_1_81_0.tar.gz && cd ~/temp/boost_1_81_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++11" --reconfigure --with-fiber --with-context --with-atomic --with-date_time --with-filesystem --with-url install && \
-    cd ~/temp && git clone https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
+    cd ~/temp && git clone -b v1.15 https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
     apt-get install -y libperlio-gzip-perl libjson-perl && \
     rm -rf ~/temp/* && \
     apt-get autoremove -y &&\
