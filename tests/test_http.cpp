@@ -898,6 +898,21 @@ TEST_CASE("Test http url view", "[http_url_view]")
     REQUIRE(!req->response.headers["x-test-reply"].compare("amiiin"));
 
     req = asyik::http_easy_request(
+        as, "GET", "http://127.0.0.1:4006/name/999?dummy1=2&dummy2=haha");
+
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(!req->response.body.compare("GET-999-dummy1=2,dummy2=haha,"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    req = asyik::http_easy_request(
+        as, "GET",
+        "http://127.0.0.1:4006/name/999?dummy1=2&dummy2=haha#testfragment");
+
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(!req->response.body.compare("GET-999-dummy1=2,dummy2=haha,"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    req = asyik::http_easy_request(
         as, "GET", "http://127.0.0.1:4006/name/999/??dummy1=2&dummy2=haha");
     REQUIRE(req->response.result() == 404);
 
