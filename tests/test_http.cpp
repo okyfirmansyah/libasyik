@@ -862,4 +862,57 @@ TEST_CASE("Test websocket binary", "[http]")
 
   as->run();
 }
+
+TEST_CASE("Test http url view", "[http_url_view]")
+{
+  auto as = asyik::make_service();
+
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
+
+  server->on_http_request("/name/<string>", "GET", [](auto req, auto args) {
+    req->response.headers.set("x-test-reply", "amiiin");
+    req->response.headers.set("content-type", "text/json");
+
+    auto uv = req->get_url_view();
+    std::string params = "-";
+    for (auto x : uv.params()) {
+      params += x.key + "=" + x.value + ",";
+    }
+    req->response.body = "GET-" + args[1] + params;
+    req->response.result(200);
+  });
+
+  as->execute([as]() {
+    auto req =
+        asyik::http_easy_request(as, "GET", "http://127.0.0.1:4006/name/999/");
+
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(!req->response.body.compare("GET-999-"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    req = asyik::http_easy_request(
+        as, "GET", "http://127.0.0.1:4006/name/999/?dummy1=2&dummy2=haha");
+
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(!req->response.body.compare("GET-999-dummy1=2,dummy2=haha,"));
+    REQUIRE(!req->response.headers["x-test-reply"].compare("amiiin"));
+
+    req = asyik::http_easy_request(
+        as, "GET", "http://127.0.0.1:4006/name/999/??dummy1=2&dummy2=haha");
+    REQUIRE(req->response.result() == 404);
+
+    req = asyik::http_easy_request(
+        as, "GET", "http://127.0.0.1:4006/name/999/?dummy1=?&dummy2=?");
+    REQUIRE(req->response.result() == 404);
+
+    req = asyik::http_easy_request(as, "GET",
+                                   "http://127.0.0.1:4006/name/99?9??9");
+    REQUIRE(req->response.result() == 404);
+
+    as->stop();
+  });
+
+  as->run();
+}
+
 }  // namespace asyik
