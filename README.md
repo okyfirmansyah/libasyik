@@ -142,7 +142,7 @@ void some_handler(asyik::service_ptr as)
 ### Requirements
 
  - C++ compiler with >=C++11 support (C++14 or C++17 is recommended, tested with GCC 7.5.0)
- - Boost library with Boost::context, Boost::fiber, and Boost::asio(Boost version 1.70.0 or above recommended)
+ - Boost library with Boost::context, Boost::fiber, and Boost::asio(Boost version 1.81.0 or above recommended)
  - CMake > 3.12
  - SOCI with SQLite and PostgreSQL backend and required low level libraries
  - See [Dockerfile](Dockerfile) to have a direct example of build environment
