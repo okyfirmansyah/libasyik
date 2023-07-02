@@ -30,6 +30,7 @@ auto async_read(Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(sz);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_read")));
@@ -52,6 +53,7 @@ auto async_write(Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(sz);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_write")));
@@ -74,6 +76,7 @@ auto async_read_until(Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(sz);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_read_until")));
@@ -112,6 +115,7 @@ auto async_resolve(Resolver& res, Args&&... args)
         if (!ec)
           prom.set_value(res);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_resolve")));
@@ -137,6 +141,7 @@ auto async_connect(Conn& con, Args&&... args)
         if (!ec)
           prom.set_value(res);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_connect")));
@@ -161,6 +166,7 @@ auto async_read_header(Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(sz);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(
               network_timeout_error("timeout error during http::async_read")));
@@ -172,7 +178,7 @@ auto async_read_header(Args&&... args) -> boost::fibers::future<size_t>
               overflow_error("incoming request body size is too large")));
         } else
           prom.set_exception(
-              std::make_exception_ptr(network_error("read error")));
+              std::make_exception_ptr(network_error(ec.message())));
       });
   return future;
 };
@@ -217,6 +223,7 @@ auto async_write(Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(sz);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(
               network_timeout_error("timeout error during http::async_write")));
@@ -241,6 +248,7 @@ auto async_handshake(Conn& con, Args&&... args) -> boost::fibers::future<void>
         if (!ec)
           prom.set_value();
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_handshake")));
@@ -264,6 +272,7 @@ auto async_shutdown(Conn& con, Args&&... args) -> boost::fibers::future<void>
         if (!ec)
           prom.set_value();
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during socket::async_shutdown")));
@@ -290,6 +299,7 @@ auto async_read(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(bytes_transferred);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_read")));
@@ -313,6 +323,7 @@ auto async_read_some(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(bytes_transferred);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_read_some")));
@@ -336,6 +347,7 @@ auto async_write(Conn& con, Args&&... args) -> boost::fibers::future<size_t>
         if (!ec)
           prom.set_value(bytes_transferred);
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_write")));
@@ -358,6 +370,7 @@ auto async_accept(Conn& con, Args&&... args) -> boost::fibers::future<void>
         if (!ec)
           prom.set_value();
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_accept")));
@@ -381,6 +394,7 @@ auto async_handshake(Conn& con, Args&&... args) -> boost::fibers::future<void>
         if (!ec)
           prom.set_value();
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_handshake")));
@@ -404,6 +418,7 @@ auto async_close(Conn& con, Args&&... args) -> boost::fibers::future<void>
         if (!ec)
           prom.set_value();
         else if ((ec == asio::error::timed_out) ||
+                 (ec == asio::error::operation_aborted) ||
                  (ec == beast::error::timeout))
           prom.set_exception(std::make_exception_ptr(network_timeout_error(
               "timeout error during websocket::async_close")));
