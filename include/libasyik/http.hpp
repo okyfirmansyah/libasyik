@@ -173,6 +173,7 @@ class http_server
   void set_request_header_limit(size_t l) { request_header_limit = l; }
 
   void set_request_body_limit(size_t l) { request_body_limit = l; }
+  void close() { acceptor->close(); }
 
  private:
   void start_accept(asio::io_context& io_service);
@@ -556,13 +557,12 @@ http_request_ptr http_easy_request(
       beast::ssl_stream<beast::tcp_stream> stream(
           as->get_io_service().get_executor(), ctx);
 
-      get_lowest_layer(stream).expires_after(
-          std::chrono::milliseconds(timeout_ms));
+      stream.next_layer().expires_after(std::chrono::milliseconds(timeout_ms));
 
       internal::socket::async_connect(beast::get_lowest_layer(stream), results)
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
-      internal::http::async_write(stream, req->beast_request);
+      auto w = internal::http::async_write(stream, req->beast_request);
 
       http::response_parser<http::string_body> resp_parser;
       resp_parser.body_limit(default_response_body_limit);
@@ -571,6 +571,7 @@ http_request_ptr http_easy_request(
       req->response.beast_response = resp_parser.release();
 
       try {
+        w.get();
         internal::ssl::async_shutdown(stream).get();
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
@@ -585,7 +586,7 @@ http_request_ptr http_easy_request(
       stream.expires_after(std::chrono::milliseconds(timeout_ms));
 
       internal::socket::async_connect(stream, results).get();
-      internal::http::async_write(stream, req->beast_request);
+      auto w = internal::http::async_write(stream, req->beast_request);
 
       http::response_parser<http::string_body> resp_parser;
       resp_parser.body_limit(default_response_body_limit);
@@ -594,7 +595,14 @@ http_request_ptr http_easy_request(
       req->response.beast_response = resp_parser.release();
 
       beast::error_code ec;
-      stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+      try {
+        w.get();
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+      } catch (...) {
+        // it's okay, we need both parties to close SSL gracefully,
+        // but it's not always the case
+        // https://stackoverflow.com/questions/25587403/boost-asio-ssl-async-shutdown-always-finishes-with-an-error
+      }
 
       return req;
     }
@@ -826,7 +834,8 @@ void http_server<StreamType>::start_accept(asio::io_context& io_service)
             ps->start_accept(service->get_io_service());
           }
         } else {
-          LOG(WARNING) << "async_accept error or canceled\n";
+          LOG(WARNING) << "async_accept error or canceled m=" << error.message()
+                       << "\n";
         }
       });
 }
