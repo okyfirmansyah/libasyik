@@ -32,7 +32,7 @@ TEST_CASE("Test rate limit basic")
     for (int i = 0; i < 50; i++)
       as->async(
           [limiter, i]() { REQUIRE(limiter->checkpoint("get_status") == 1); });
-    asyik::sleep_for(std::chrono::milliseconds(10));
+    asyik::sleep_for(std::chrono::milliseconds(5));
     LOG(INFO) << "done\n";
     REQUIRE(limiter->get_remaining("get_status") == 50);
 

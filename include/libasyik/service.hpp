@@ -71,7 +71,7 @@ class service : public std::enable_shared_from_this<service> {
   service(service&&) = default;
   service& operator=(service&&) = default;
 
-  service(struct private_&&);
+  service(struct private_&&, int thread_num);
 
   static async_stats get_async_stats();
 
@@ -132,9 +132,9 @@ class service : public std::enable_shared_from_this<service> {
   void run();
   void stop()
   {
-    execute([i = &io_service, s = &stopped]() {
+    execute([s = &stopped, cv = &terminate_req_cond]() {
       *s = true;
-      std::move(i);
+      cv->notify_one();
     });
   };
   bool is_stopped() { return stopped; }
@@ -162,12 +162,16 @@ class service : public std::enable_shared_from_this<service> {
 
   static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
   static std::shared_ptr<AixLog::Sink> default_log_sink;
+  int io_service_thread_num;
+
+  boost::fibers::condition_variable terminate_req_cond;
+  boost::fibers::mutex terminate_req_mtx;
 
  public:
-  friend service_ptr make_service();
+  friend service_ptr make_service(int thread_num);
 };
 
-service_ptr make_service();
+service_ptr make_service(int thread_num = 1);
 
 }  // namespace asyik
 

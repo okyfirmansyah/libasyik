@@ -38,6 +38,7 @@ TEST_CASE("basic execute and async latency checking", "service")
                            .count())
                 << "\n";
     });
+    ts = std::chrono::high_resolution_clock::now();
     as->async([as, ts]() {
       auto diff = std::chrono::high_resolution_clock::now() - ts;
       REQUIRE(
@@ -117,7 +118,7 @@ TEST_CASE("Check return value from execute()", "[service]")
 
 TEST_CASE("Check return value from async()", "[service]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
   as->execute([&]() {
     std::string sequence =
         as->async([]() -> std::string { return "hehehe"; }).get();
@@ -140,7 +141,7 @@ TEST_CASE("Check return value from async()", "[service]")
 
 TEST_CASE("Test return value execute from async", "[service]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   as->async([as]() {
     std::string test =
@@ -154,7 +155,7 @@ TEST_CASE("Test return value execute from async", "[service]")
 
 TEST_CASE("execute async", "[service]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
   std::atomic<int> i(0);
 
   as->async(
@@ -304,7 +305,7 @@ TEST_CASE("testing complex async and execute interaction", "[service]")
 
 TEST_CASE("testing highly parallel, fiber-i/o blocking async()", "[service]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
   int count = 0;
 
   for (int i = 0; i < 1000; i++) {

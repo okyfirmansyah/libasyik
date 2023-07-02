@@ -134,7 +134,7 @@ TEST_CASE("check http_analyze_url against URL cases")
 TEST_CASE("Create http server and client, do some websocket communications",
           "[websocket]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
@@ -246,10 +246,12 @@ TEST_CASE("Create http server and client, do some websocket communications",
       if (success >= 20) break;
       asyik::sleep_for(std::chrono::milliseconds(100));
     }
+    server->close();
     as->stop();
   });
 
   as->run();
+  LOG(INFO) << "selesai!\n";
   REQUIRE(success == 20);
 }
 
@@ -308,7 +310,7 @@ TEST_CASE("Create http server and client, do some http communications",
   server->set_request_header_limit(1024);
 
   asyik::sleep_for(std::chrono::milliseconds(100));
-  as->execute([as]() {
+  as->execute([as, server]() {
     auto req = asyik::http_easy_request(
         as, "POST", "http://127.0.0.1:4004/post-only/30/name/listed?dummy=hihi",
         "hehe", {{"x-test", "ok"}});
@@ -398,7 +400,7 @@ TEST_CASE("Create http server and client, do some http communications",
           << e.what() << "\n";
       REQUIRE(false);
     }
-
+    server->close();
     as->stop();
   });
 
@@ -411,7 +413,7 @@ TEST_CASE("Create http server and client, do some http communications",
 
 TEST_CASE("Test http client timeout", "[http]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
 
@@ -424,7 +426,7 @@ TEST_CASE("Test http client timeout", "[http]")
       });
 
   asyik::sleep_for(std::chrono::milliseconds(100));
-  as->execute([as]() {
+  as->execute([as, server]() {
     LOG(INFO) << "begin accessing long query..\n";
     try {
       auto req = asyik::http_easy_request(
@@ -439,6 +441,7 @@ TEST_CASE("Test http client timeout", "[http]")
       REQUIRE(false);
     }
     asyik::sleep_for(std::chrono::seconds(3));
+    server->close();
     as->stop();
   });
 
@@ -526,7 +529,7 @@ inline void load_server_certificate(boost::asio::ssl::context& ctx)
 TEST_CASE("Create https server and client, do some https communications",
           "[https]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   // The SSL context is required, and holds certificates
   ssl::context ctx{ssl::context::tlsv12};
@@ -576,7 +579,7 @@ TEST_CASE("Create https server and client, do some https communications",
   server->set_request_header_limit(1024);
 
   asyik::sleep_for(std::chrono::milliseconds(100));
-  as->execute([as]() {
+  as->execute([as, server]() {
     auto req = asyik::http_easy_request(
         as, "POST", "https://127.0.0.1:4004/post-only/30/name/listed", "hehe",
         {{"x-test", "ok"}});
@@ -661,7 +664,7 @@ TEST_CASE("Create https server and client, do some https communications",
                  << e.what() << "\n";
       REQUIRE(false);
     }
-
+    server->close();
     as->stop();
   });
 
@@ -689,7 +692,7 @@ auto async_send(Conn& con, Args&&... args) -> boost::fibers::future<std::size_t>
 
 TEST_CASE("test manual handling of http requests", "[http]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   // The SSL context is required, and holds certificates
   ssl::context ctx{ssl::context::tlsv12};
@@ -742,7 +745,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
       });
 
   asyik::sleep_for(std::chrono::milliseconds(100));
-  as->execute([as]() {
+  as->execute([as, server, server2]() {
     {
       auto req = asyik::http_easy_request(
           as, "GET", "http://127.0.0.1:4004/manual", "", {{"x-test", "ok"}});
@@ -781,6 +784,9 @@ TEST_CASE("test manual handling of http requests", "[http]")
 
     LOG(INFO) << "performing client requests from inside async() done.\n";
 
+    // test what if, we dont close the server properly
+    // server->close();
+    // server2->close();
     as->stop();
   });
 
@@ -789,7 +795,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
 
 TEST_CASE("Test websocket binary", "[http]")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(4);
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
   std::vector<uint8_t> buff;
@@ -841,7 +847,7 @@ TEST_CASE("Test websocket binary", "[http]")
       });
 
   // check ws client timeout
-  as->execute([as, &buff]() {
+  as->execute([as, &buff, server]() {
     asyik::sleep_for(std::chrono::milliseconds(50));
 
     asyik::websocket_ptr ws =
@@ -856,6 +862,8 @@ TEST_CASE("Test websocket binary", "[http]")
     ws->write_basic_buffer(buff);
 
     asyik::sleep_for(std::chrono::milliseconds(500));
+    // test what if, we dont close the server properly
+    // server->close();
     as->stop();
     LOG(INFO) << "binary test completed\n";
   });
@@ -884,7 +892,7 @@ TEST_CASE("Test http url view", "[http_url_view]")
         req->response.result(200);
       });
 
-  as->execute([as]() {
+  as->execute([as, server]() {
     auto req =
         asyik::http_easy_request(as, "GET", "http://127.0.0.1:4006/name/999/");
 
@@ -926,6 +934,7 @@ TEST_CASE("Test http url view", "[http_url_view]")
                                    "http://127.0.0.1:4006/name/99?9??9");
     REQUIRE(req->response.result() == 404);
 
+    server->close();
     as->stop();
   });
 
