@@ -3,9 +3,9 @@ project(libasyik)
 
 SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
 
-add_subdirectory(tests)
 add_subdirectory(external/Catch2)
 add_subdirectory(src)
+add_subdirectory(tests)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
