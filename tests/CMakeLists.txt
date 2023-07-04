@@ -11,7 +11,13 @@ add_executable(${PROJECT_NAME} test.cpp)
 target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memcache.cpp test_rate_limit.cpp)
 
 if(LIBASYIK_ENABLE_SOCI)
-target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp )
+    target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp)
+    if(SOCI_FOUND)
+        target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/postgresql)
+        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci)
+        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
+        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
+    endif()
 endif()
 
 
