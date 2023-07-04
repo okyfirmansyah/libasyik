@@ -12,12 +12,10 @@ target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memca
 
 if(LIBASYIK_ENABLE_SOCI)
     target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp)
-    if(SOCI_FOUND)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/postgresql)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
-    endif()
+    target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/postgresql)
+    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci)
+    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
+    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
 endif()
 
 
