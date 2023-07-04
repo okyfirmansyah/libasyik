@@ -11,8 +11,8 @@ RUN apt-get -y update && \
     apt-get install -y build-essential gdb wget git libssl-dev clang-format && \
     mkdir ~/temp && cd ~/temp && \
     apt-get install -y cmake && \
-    cd ~/temp &&  wget https://sourceforge.net/projects/boost/files/boost/1.81.0/boost_1_81_0.tar.gz && \
-    tar -zxvf boost_1_81_0.tar.gz && cd ~/temp/boost_1_81_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++11" --reconfigure --with-fiber --with-context --with-atomic --with-date_time --with-filesystem --with-url install && \
+    cd ~/temp &&  wget -q https://sourceforge.net/projects/boost/files/boost/1.81.0/boost_1_81_0.tar.gz && \
+    tar -zxf boost_1_81_0.tar.gz && cd ~/temp/boost_1_81_0 && ./bootstrap.sh && ./b2 cxxflags="-std=c++11" --reconfigure --with-fiber --with-context --with-atomic --with-date_time --with-filesystem --with-url install && \
     cd ~/temp && git clone -b v1.15 https://github.com/linux-test-project/lcov.git && cd lcov && make install && cd .. && \
     apt-get install -y libperlio-gzip-perl libjson-perl && \
     rm -rf ~/temp/* && \
@@ -29,7 +29,7 @@ RUN apt-get -y update && \
     cmake .. -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql/libpq && \
     make -j6 && make install && \
     cd ~/temp && \
-    wget https://github.com/SOCI/soci/archive/refs/tags/v4.0.3.zip && \
+    wget -q https://github.com/SOCI/soci/archive/refs/tags/v4.0.3.zip && \
     unzip v4.0.3.zip && \
     cd soci-4.0.3 && \
     mkdir build && cd build && \
