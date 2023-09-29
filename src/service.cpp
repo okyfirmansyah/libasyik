@@ -6,10 +6,8 @@
 
 #include "aixlog.hpp"
 #include "boost/fiber/all.hpp"
-#include "libasyik/http.hpp"
 
 namespace ip = boost::asio::ip;
-namespace websocket = beast::websocket;
 namespace asio = boost::asio;
 namespace fibers = boost::fibers;
 namespace beast = boost::beast;
@@ -61,12 +59,14 @@ async_stats service::get_async_stats()
   return stats;
 }
 
+thread_local service_wptr service::active_service;
 void service::run()
 {
   BOOST_ASSERT_MSG(!stopped,
                    "Re-run already stopped service is not supported, please "
                    "use different thread and create new service!");
 
+  service::active_service = shared_from_this();
   fiber fb([as = shared_from_this()]() {
     std::function<void()> tsk;
     while (!as->stopped && boost::fibers::channel_op_status::closed !=
@@ -76,14 +76,18 @@ void service::run()
     }
   });
 
-  auto work = boost::make_shared<boost::asio::io_service::work>(io_service);
+  auto work = std::make_shared<boost::asio::io_service::work>(io_service);
   std::vector<std::thread> t;
-  for (int i = 0; i < io_service_thread_num; i++)
-    t.emplace_back([i = &io_service, s = &stopped]() {
+  sched_param sch_params;
+  for (int i = 0; i < io_service_thread_num; i++) {
+    t.emplace_back([i = &io_service, s = &stopped, &sch_params]() {
       while (*s == false) {
         i->run();
       }
     });
+    sch_params.sched_priority = 2;
+    pthread_setschedparam(t.back().native_handle(), SCHED_FIFO, &sch_params);
+  }
 
   // wait/yield until stop is signaled
   std::unique_lock<fibers::mutex> l(terminate_req_mtx);
@@ -101,6 +105,7 @@ void service::run()
   }
 
   fb.join();
+  service::active_service.reset();
 }
 
 void service::init_workers()

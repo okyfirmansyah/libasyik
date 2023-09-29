@@ -62,6 +62,7 @@ class service : public std::enable_shared_from_this<service> {
   static std::atomic<uint32_t> async_task_terminated;
   static std::atomic<uint32_t> async_task_error;
   static std::atomic<uint32_t> async_queue_size;
+  static thread_local service_wptr active_service;
 
  public:
   ~service(){};
@@ -114,7 +115,10 @@ class service : public std::enable_shared_from_this<service> {
     auto future = p->get_future();
     auto t = std::atomic_load(&tasks);
     async_queue_size++;
-    t->push([f = std::forward<F>(fun), &args..., p]() mutable {
+    t->push([f = std::forward<F>(fun), as = weak_from_this(), &args...,
+             p]() mutable {
+      auto prev_as = service::active_service;
+      service::active_service = as;
       try {
         service_internal::helper<
             typename std::result_of<F(Args...)>::type>::set(p, f,
@@ -124,6 +128,7 @@ class service : public std::enable_shared_from_this<service> {
         async_task_error++;
         p->set_exception(std::current_exception());
       };
+      service::active_service = prev_as;
     });
 
     return future;
@@ -138,6 +143,8 @@ class service : public std::enable_shared_from_this<service> {
     });
   };
   bool is_stopped() { return stopped; }
+
+  static service_ptr get_current_service() { return active_service.lock(); }
 
   boost::asio::io_context& get_io_service() { return io_service; };
   static void terminate();
@@ -170,6 +177,11 @@ class service : public std::enable_shared_from_this<service> {
  public:
   friend service_ptr make_service(int thread_num);
 };
+
+inline static service_ptr get_current_service()
+{
+  return service::get_current_service();
+}
 
 service_ptr make_service(int thread_num = 1);
 

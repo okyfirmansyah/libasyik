@@ -21,12 +21,18 @@ TEST_CASE("basic execute and async latency checking", "service")
 {
   auto as = asyik::make_service();
 
-  as->execute([as]() {
+  as->execute([]() {
+    auto as = asyik::get_current_service();
+    REQUIRE(as);
+
     as->async([]() {}).get();  // just to trigger threadpool creation
 
     asyik::sleep_for(std::chrono::milliseconds(500));
     auto ts = std::chrono::high_resolution_clock::now();
-    as->execute([as, ts]() {
+    as->execute([ts]() {
+      auto as = asyik::get_current_service();
+      REQUIRE(as);
+
       auto diff = std::chrono::high_resolution_clock::now() - ts;
       REQUIRE(
           std::chrono::duration_cast<std::chrono::microseconds>(diff).count() <
@@ -40,6 +46,8 @@ TEST_CASE("basic execute and async latency checking", "service")
     });
     ts = std::chrono::high_resolution_clock::now();
     as->async([as, ts]() {
+      REQUIRE(as == asyik::get_current_service());
+
       auto diff = std::chrono::high_resolution_clock::now() - ts;
       REQUIRE(
           std::chrono::duration_cast<std::chrono::microseconds>(diff).count() <
@@ -62,7 +70,10 @@ TEST_CASE("very basic fiber execution", "[service]")
 {
   auto as = asyik::make_service();
 
-  as->execute([=] {
+  as->execute([] {
+    auto as = asyik::get_current_service();
+    REQUIRE(as);
+
     LOG(INFO) << "brief fiber\n";
     asyik::sleep_for(std::chrono::milliseconds(1));
     as->stop();
@@ -144,6 +155,8 @@ TEST_CASE("Test return value execute from async", "[service]")
   auto as = asyik::make_service(4);
 
   as->async([as]() {
+    REQUIRE(as == asyik::get_current_service());
+
     std::string test =
         as->execute([]() -> std::string { return "hehe"; }).get();
     REQUIRE(!test.compare("hehe"));
