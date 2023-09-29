@@ -76,11 +76,19 @@ bool http_analyze_url(string_view url, http_url_scheme& scheme)
 
 http_server_ptr<http_stream_type> make_http_server(service_ptr as,
                                                    string_view addr,
-                                                   uint16_t port)
+                                                   uint16_t port,
+                                                   bool reuse_port)
 {
   auto p = std::make_shared<http_server<http_stream_type>>(
       http_server<http_stream_type>::private_{}, as, addr, port);
 
+  int one = 1;
+  setsockopt(p->acceptor->native_handle(), SOL_SOCKET,
+             SO_REUSEADDR | (SO_REUSEPORT * reuse_port), &one, sizeof(one));
+
+  p->acceptor->bind(
+      ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port));
+  p->acceptor->listen();
   p->start_accept(as->get_io_service());
   return p;
 }
@@ -88,11 +96,20 @@ http_server_ptr<http_stream_type> make_http_server(service_ptr as,
 http_server_ptr<https_stream_type> make_https_server(service_ptr as,
                                                      ssl::context&& ssl,
                                                      string_view addr,
-                                                     uint16_t port)
+                                                     uint16_t port,
+                                                     bool reuse_port)
 {
   auto p = std::make_shared<http_server<https_stream_type>>(
       http_server<https_stream_type>::private_{}, as, addr, port);
   p->ssl_context = std::make_shared<ssl::context>(std::move(ssl));
+
+  int one = 1;
+  setsockopt(p->acceptor->native_handle(), SOL_SOCKET,
+             SO_REUSEADDR | (SO_REUSEPORT * reuse_port), &one, sizeof(one));
+
+  p->acceptor->bind(
+      ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port));
+  p->acceptor->listen();
 
   p->start_accept(as->get_io_service());
   return p;

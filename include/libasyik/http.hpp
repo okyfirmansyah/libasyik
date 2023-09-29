@@ -64,11 +64,13 @@ using websocket_close_code = boost::beast::websocket::close_code;
 
 http_server_ptr<http_stream_type> make_http_server(service_ptr as,
                                                    string_view addr,
-                                                   uint16_t port = 80);
+                                                   uint16_t port = 80,
+                                                   bool reuse_port = false);
 http_server_ptr<https_stream_type> make_https_server(service_ptr,
                                                      ssl::context&& ssl,
                                                      string_view,
-                                                     uint16_t port = 443);
+                                                     uint16_t port = 443,
+                                                     bool reuse_port = false);
 // http_connection_ptr make_http_connection(service_ptr as, string_view addr,
 // string_view port);
 websocket_ptr make_websocket_connection(service_ptr as, string_view url,
@@ -233,9 +235,9 @@ class http_server
   friend class http_connection;
   friend http_server_ptr<http_stream_type> make_http_server(service_ptr,
                                                             string_view,
-                                                            uint16_t);
+                                                            uint16_t, bool);
   friend http_server_ptr<https_stream_type> make_https_server(
-      service_ptr, ssl::context&& ssl, string_view, uint16_t);
+      service_ptr, ssl::context&& ssl, string_view, uint16_t, bool);
 };
 
 template <typename StreamType>
@@ -807,10 +809,9 @@ http_server<StreamType>::http_server(struct private_&&, service_ptr as,
       request_body_limit(default_request_body_limit),
       request_header_limit(default_request_header_limit)
 {
-  acceptor = std::make_shared<ip::tcp::acceptor>(
-      as->get_io_service(),
-      ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port),
-      true);
+  acceptor =
+      std::make_shared<ip::tcp::acceptor>(as->get_io_service(), tcp::v4());
+
   if (!acceptor) throw resource_error("could not allocate TCP acceptor");
 }
 
