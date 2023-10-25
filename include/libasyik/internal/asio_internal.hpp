@@ -150,6 +150,34 @@ auto async_connect(Conn& con, Args&&... args)
 
 namespace http {
 template <typename... Args>
+auto async_read_header(Args&&... args) -> boost::fibers::future<size_t>
+{
+  boost::fibers::promise<size_t> promise;
+  auto future = promise.get_future();
+  boost::beast::http::async_read_header(
+      std::forward<Args>(args)...,
+      [prom = std::move(promise)](const boost::system::error_code& ec,
+                                  size_t sz) mutable {
+        if (!ec)
+          prom.set_value(sz);
+        else if ((ec == asio::error::timed_out) ||
+                 (ec == beast::error::timeout))
+          prom.set_exception(std::make_exception_ptr(
+              network_timeout_error("timeout error during http::async_read")));
+        else if (ec == beast::http::error::header_limit) {
+          prom.set_exception(std::make_exception_ptr(
+              overflow_error("incoming request header size is too large")));
+        } else if (ec == beast::http::error::body_limit) {
+          prom.set_exception(std::make_exception_ptr(
+              overflow_error("incoming request body size is too large")));
+        } else
+          prom.set_exception(
+              std::make_exception_ptr(network_error("read error")));
+      });
+  return future;
+};
+
+template <typename... Args>
 auto async_read(Args&&... args) -> boost::fibers::future<size_t>
 {
   boost::fibers::promise<size_t> promise;

@@ -657,9 +657,17 @@ void http_connection<StreamType>::start()
           auto& req = asyik_req->beast_request;
           asyik_req->connection_wptr = http_connection_wptr<StreamType>(p);
           while (1) {
-            http::request_parser<http::string_body> req_parser;
-            req_parser.body_limit(body_limit);
-            req_parser.header_limit(header_limit);
+            http::request_parser<http::empty_body> empty_parser;
+            empty_parser.header_limit(header_limit);
+            empty_parser.body_limit(body_limit);
+
+            asyik_req->buffer.clear();
+            asyik::internal::http::async_read_header(
+                p->get_stream(), asyik_req->buffer, empty_parser)
+                .get();
+
+            http::request_parser<http::string_body> req_parser{
+                std::move(empty_parser)};
 
             asyik::internal::http::async_read(p->get_stream(),
                                               asyik_req->buffer, req_parser)
