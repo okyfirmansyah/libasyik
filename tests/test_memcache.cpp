@@ -9,7 +9,7 @@ void _TEST_invoke_memcache(){};
 
 TEST_CASE("Testing basic of memcache")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(1);
   auto cache = asyik::make_memcache<std::string, int, 5>(as);
 
   // basic put-get
@@ -104,7 +104,7 @@ TEST_CASE("Testing basic of memcache")
 
 TEST_CASE("Testing active pruning mechanism")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(1);
   auto cache = asyik::make_memcache<std::string, int, 1, 50>(as);
 
   as->execute([cache, as]() {

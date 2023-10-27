@@ -137,9 +137,13 @@ class service : public std::enable_shared_from_this<service> {
   void run();
   void stop()
   {
-    execute([s = &stopped, cv = &terminate_req_cond]() {
+    execute([s = &stopped, cv = &terminate_req_cond, i = &io_service,
+             n = io_service_thread_num]() {
       *s = true;
-      cv->notify_one();
+      if (!n)
+        std::move(i);
+      else
+        cv->notify_one();
     });
   };
   bool is_stopped() { return stopped; }
@@ -183,7 +187,7 @@ inline static service_ptr get_current_service()
   return service::get_current_service();
 }
 
-service_ptr make_service(int thread_num = 1);
+service_ptr make_service(int thread_num = 0);
 
 }  // namespace asyik
 

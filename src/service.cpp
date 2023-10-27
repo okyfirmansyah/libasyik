@@ -28,8 +28,9 @@ service::service(struct service::private_&&, int thread_num)
               1024)),
       io_service_thread_num(thread_num)
 {
-  BOOST_ASSERT_MSG(io_service_thread_num > 0,
-                   "service's thread number should be greater than 0!");
+  BOOST_ASSERT_MSG(
+      io_service_thread_num >= 0,
+      "service's thread number should be greater or equal than 0!");
 
   if (!default_log_sink)
     default_log_sink =
@@ -76,31 +77,52 @@ void service::run()
     }
   });
 
-  auto work = std::make_shared<boost::asio::io_service::work>(io_service);
+  std::shared_ptr<boost::asio::io_service::work> work;
   std::vector<std::thread> t;
-  sched_param sch_params;
-  for (int i = 0; i < io_service_thread_num; i++) {
-    t.emplace_back([i = &io_service, s = &stopped, &sch_params]() {
-      while (*s == false) {
-        i->run();
-      }
-    });
-    sch_params.sched_priority = 2;
-    pthread_setschedparam(t.back().native_handle(), SCHED_FIFO, &sch_params);
+
+  if (!io_service_thread_num) {
+    // in-thread io_service loop
+    int idle_threshold = 30000;
+    while (!stopped) {
+      if (!io_service.poll()) {
+        if (idle_threshold) {
+          idle_threshold--;
+          asyik::sleep_for(std::chrono::microseconds(10));
+        } else {
+          asyik::sleep_for(std::chrono::microseconds(1000));
+        }
+      } else
+        idle_threshold = 30000;
+      if (!stopped) io_service.restart();
+    }
+  } else {
+    // separate thread io_service loop
+    work = std::make_shared<boost::asio::io_service::work>(io_service);
+    sched_param sch_params;
+    for (int i = 0; i < io_service_thread_num; i++) {
+      t.emplace_back([i = &io_service, s = &stopped, &sch_params]() {
+        while (*s == false) {
+          i->run();
+        }
+      });
+      sch_params.sched_priority = 2;
+      pthread_setschedparam(t.back().native_handle(), SCHED_FIFO, &sch_params);
+    }
+
+    // wait/yield until stop is signaled
+    std::unique_lock<fibers::mutex> l(terminate_req_mtx);
+    while (!stopped) terminate_req_cond.wait(l);
+    l.unlock();
+
+    io_service.stop();
+
+    for (int i = 0; i < io_service_thread_num; i++) t.at(i).join();
+    std::move(io_service);
   }
-
-  // wait/yield until stop is signaled
-  std::unique_lock<fibers::mutex> l(terminate_req_mtx);
-  while (!stopped) terminate_req_cond.wait(l);
-  l.unlock();
-
-  io_service.stop();
-
-  for (int i = 0; i < io_service_thread_num; i++) t.at(i).join();
-  std::move(io_service);
 
   execute_tasks->close();
   for (int i = 0; i < 10000; i++) {
+    if (!io_service_thread_num) io_service.poll();  // build-in thread only
     asyik::sleep_for(std::chrono::microseconds(10));
   }
 

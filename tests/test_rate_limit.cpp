@@ -9,7 +9,7 @@ void _TEST_invoke_rate_limit(){};
 
 TEST_CASE("Test rate limit basic")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(1);
   as->execute([as]() {
     auto limiter = asyik::make_rate_limit_memory(as, 100, 50);
 
@@ -50,7 +50,7 @@ TEST_CASE("Test rate limit basic")
 
 TEST_CASE("Test complex async rate limit(achieve qps)")
 {
-  auto as = asyik::make_service();
+  auto as = asyik::make_service(2);
   as->execute([as]() {
     const int desired_qps = 90;
     const int num_worker = 8;
