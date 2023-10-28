@@ -1,5 +1,5 @@
 # System Design
-Libasyik::service use explicitly single thread and **share-nothing** philosophy by strictly assigning each `as->run()` to a thread. Any fiber that being spawned by `as->execute()` will be executed in that thread in 1:N concurrency fashion.
+`Libasyik::service` use explicitly single thread and **share-nothing** philosophy by strictly assigning each `as->run()` to a thread. Any fiber that being spawned by `as->execute()` will be executed in that thread in 1:N concurrency fashion.
 
 Supposed a basic Libasyik HTTP server:
 ```c++
@@ -76,12 +76,13 @@ If in a multi-threading environment, interaction between thread is unavaoidable,
 
 # Multithreading on Networking Approach
 One common pattern to distribute incoming connection to multiple thread handlers is to use single thread as acceptor and then dispatch to one of the handler threads:
+
 <img src="single_acceptor.png" width="640" >
 
 This approach has a drawbacks that the acceptor can be the hotspot and in some edge case(for extreme number of requests) can be a bottleneck. Transfering between acceptor thread to the handler thread will also add context-switching overhead.
 
 ### Libasyik's approach
-Libasyik use **share nothing** philosophy, and this also including how it handles multithreading server. Instead of assigning acceptor thread as the front line, we turn kernel to act as load balancer via `SO_REUSEPORT`` feature in the linux kernel:
+Libasyik use **shared-nothing** philosophy, and this also including how it handles multithreading server. Instead of assigning acceptor thread as the front line, we turn kernel to act as load balancer via `SO_REUSEPORT` feature in the linux kernel:
 
 <img src="multiple_acceptors.png" width="540" >
 

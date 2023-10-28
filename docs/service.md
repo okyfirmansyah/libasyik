@@ -328,3 +328,20 @@ int main()
   auto read_sz2=read_fu2.get();
 }
 ```
+
+### get executing service from the inside of async() and execute()
+You can get the originated `asyik::service` that the asynchronous tasks are dispatcher from. For example, you can then execute some follow up routine in the original service's thread:
+
+```c++
+  as->async([]() // also work for as->execute()
+  {
+    ...
+    auto as=asyik::get_current_service();
+    
+    // execute back the follow up routine in the original as's thread
+    as->execute([]()
+    {
+      ...
+    });
+  });
+```
