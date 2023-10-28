@@ -3,12 +3,11 @@ Common programming model for implementing HTTP-based service or network programm
 <img src="typical_server_designs.png" width="800" >
 
 ### Synchronous programming model using thread pool
-One aspect of synchronous programming is the easiness to reasond and code of program flow. No callback hell, no need to maintain state machine, easy to handle exception or error and other conveniences.
+One aspect of synchronous programming is the easiness to reason and code the program flow. No callback hell, no need to maintain state machine, easy to handle exception/error and other conveniences.
 
-Synchronous network programming using a thread pool is an approach that blends synchronous interface with the efficiency and scalability of a thread pool. It's widely used in scenarios where applications must handle multiple network connections concurrently, such as servers. However, it's crucial to understand that while this approach offers advantages, it comes with significant drawbacks.
+Synchronous network programming using a thread pool is an approach that blends synchronous interface with the efficiency and scalability of a thread pool. It's widely used in scenarios where applications must handle multiple network connections concurrently, such as servers.
 
-How it works:
-
+**How it works:**
 1. Thread Pool Setup: A fixed number of threads are allocated to create a thread pool. This is designed to efficiently manage incoming network requests without overloading the system.
 
 2. Blocking I/O Operations: Network operations, like reading from or writing to sockets, are inherently blocking. They pause the program's execution until the operation is finished. In synchronous network programming, these operations are carried out in a blocking manner.
@@ -20,8 +19,7 @@ How it works:
 5. Efficiency and Scalability: The thread pool minimizes the overhead of creating and destroying threads for every new network request, improving resource utilization and scalability.
 
 
-Drawbacks:
-
+**Drawbacks:**
 1. Blocking Delays: The most significant drawback is blocking. Threads waiting for I/O operations to complete can lead to significant delays in the application's responsiveness, especially when handling multiple clients. Long-running or stalled I/O operations can impact the entire system's performance.
 
 2. Resource Consumption: Maintaining a thread pool with a substantial number of threads can consume a significant amount of system resources, and managing those resources efficiently can be complex.
