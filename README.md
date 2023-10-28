@@ -2,7 +2,7 @@
 
 [![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
-**Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html) and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in synchronous-like, user-threading model(fiber).
+**Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html) and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in an easy synchronous-like, user-threading model(fiber).
 
 ```c++
 #include "libasyik/service.hpp"
@@ -30,7 +30,7 @@ void main()
    - Based on lightweight thread using **Boost::Fiber** (easy to create **millions** of fibers!)
    - Programming in synchronous fashions, but lightweight enough to implement **1 connection=1 Process** to simplify network programming models
    - Wraps **boost::asio** and **boost::beast** asynchronous APIs into "synchronous" libasyik's API's that generally much easier to use and programs
- - API to rapidly build HTTP-based service
+ - API to rapidly build HTTP-based services
    - Pattern matching with arguments supported for HTTP server
    - Create websocket server as easy as HTTP request handlers
    - API for HTTP and websocket clients
@@ -128,6 +128,18 @@ void some_handler(asyik::service_ptr as)
    - [Logging](docs/logging.md)
    - [Fiber Framework](docs/service.md)
    - [HTTP/Websocket](docs/http.md)
+     - [Basic HTTP with arguments](docs/http.md#basic-http-with-arguments)
+     - [Set and get HTTP payload and headers](docs/http.md#set-and-get-http-payload-and-headers)
+     - [HTTP client](docs/http.md#http-client)
+     - [Websocket server](docs/http.md#websockets-server)
+     - [Websocket client](docs/http.md#websocket-client)
+     - [Sending/Reading binary buffer](docs/http.md#websocket-client)
+     - [Create SSL server](docs/http.md#create-ssl-server)
+     - [Set request body and header size limit](docs/http.md#set-incoming-request-body-and-header-size-limits)
+     - [Apply rate limiter for HTTP API](docs/http.md#apply-rate-limiter-to-http-api)
+     - [Handle HTTP connection and its responses manually](docs/http.md#advanced-topic-handle-http-connection-and-its-responses-manually)
+     - [Websocket idle timeout and keep-alive packets](docs/http.md#advanced-topic-set-websocket-idle-timeout-and-keep-alive-ping)
+     - [Extracting boost::url_view from http handler](docs/http.md#extracting-boosturl_view-in-http-handler)
    - [SOCI/SQL](docs/sql.md)
    - [Internal KV Cache](docs/cache.md)
    - [Leaky Bucket Rate Limiter](docs/rate_limit.md)
@@ -219,9 +231,10 @@ This project is made possible by the community surrounding it and especially the
 
 ## Libraries
 
-### [Boost](https://www.boost.org/)
-### [Boost Fibers](https://github.com/boostorg/fiber)
-### [Boost ASIO](https://github.com/chriskohlhoff/asio)
-### [Boost Beast](https://github.com/boostorg/beast)
-### [Lib SOCI](https://github.com/SOCI/soci)
-### [Catch2](https://github.com/catchorg/Catch2)
+- [Boost](https://www.boost.org/)
+- [Boost Fibers](https://github.com/boostorg/fiber)
+- [Boost ASIO](https://github.com/chriskohlhoff/asio)
+- [Boost Beast](https://github.com/boostorg/beast)
+- [Lib SOCI](https://github.com/SOCI/soci)
+- [Catch2](https://github.com/catchorg/Catch2)
+- [Aixlog](https://github.com/badaix/aixlog)

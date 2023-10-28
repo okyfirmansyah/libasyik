@@ -228,6 +228,36 @@ int main()
 ```
 Please take a look at [Beast's example](https://www.boost.org/doc/libs/1_73_0/libs/beast/example/common/server_certificate.hpp) for an example on how to perform SSL context creation/**load_server_certificate()**.
 
+### Create multi-thread server
+Libasyik use **explicitly single thread** model, meaning an instance of `asyik::service` used to create HTTP server instance will handles incoming connection by the same thread the `as->run()` is called.
+
+You can still create a HTTP server that can accept connection in multi-thread fashion by implementing multiple `std::thread` each having their own `asyik::service` and a HTTP server instance. To avoid IP bind conflict, the HTTP server API allow reusing the same listening address and port, utilizing Linux kernel's [SO_REUSEPORT](https://lwn.net/Articles/542629/):
+```c++
+int main()
+{
+  for (int i = 0; i < 8; i++) {
+    std::thread t([&stopped]() {
+      auto as = asyik::make_service();
+
+      // create http server with reusable port=true
+      auto server = asyik::make_http_server(as, "127.0.0.1", 4004, true);
+      server->on_http_request("/flag", "GET", [&flag_http](auto req, auto args) {
+                                req->response.body = "ok";
+                                req->response.result(200);
+                              });
+
+      as->run();
+
+    }
+    );
+    t.detach();
+  }
+
+  ...
+}
+```
+Obviously, since all HTTP handler now run in one of multiple threads, any access to a shared variables or memory regions should be protected with synchronizations.
+
 #### Set Incoming Request Body and Header Size Limits
 To protect against unbounded incoming data size(overflow or out of memory error), by default, incoming request header and body size are set to both 1MB each.  You can override these two settings using following:
 ```c++
@@ -380,7 +410,7 @@ server->on_websocket("/ws_endpoint", [](auto ws, auto args) {
  });
  ```
  
-### Configuring Keep-alive mechanism
+#### Configuring Keep-alive mechanism
 In most cases, it's not really convenient to set idle timeout alone, for e.g some WebSocket use case scenario can have no data in a minute while the transmission itself is still intact, so killing and renewing the connection will be inefficient. With the keep-alive mechanism, you can push underlying WebSocket protocol implementation to send and receive control messages, so it will be counted as aliveness/healthiness check of the connection.
 
 When waiting for incoming data, the WebSocket implementation will send PING behind the scene and expect PONG reply from the other end, this invisible control message exchange will prolong the timeout period:
@@ -395,7 +425,7 @@ auto s = ws->get_string();
 
 **note:** If the other end that expected to reply PING with PONG is also libasyik WebSocket(based on boost::beast), then the other end will have to be in the process of receiving data as well, otherwise the PONG will not be emitted.
 
-#### Extracting boost.url_view in http handler
+### Extracting boost.url_view in http handler
 Boost.url_view extracts and organizes information from a given URL. This information includes the protocol (e.g. https), domain name (e.g. www.example.com), path (e.g. /products/category1), and query parameters (e.g. ?sort=price&filter=new).
 Additional resources: [Boost::Url](https://www.boost.org/doc/libs/master/libs/url/doc/html/url/overview.html#url.overview.quick_look.accessing)
 ```c++
