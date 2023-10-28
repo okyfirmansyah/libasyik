@@ -292,26 +292,6 @@ Currently, libasyik only support limited APIs to support this, basically you han
 
 Thanks to fiber programming model, it's easy to switch from usual short-lived handler into long-lived fiber connection handler. For example, consider a SSE server:
 ```c++
-// create wrapper for ASIO's stream async_send(SSL/TCP stream)
-template <typename Conn, typename... Args>
-auto async_send(Conn &con, Args &&... args)
-{
-    boost::fibers::promise<std::size_t> promise;
-    auto future = promise.get_future();
-
-    con.async_write_some(
-      std::forward<Args>(args)...,
-      [prom = std::move(promise)](const boost::system::error_code &ec,
-                                  std::size_t size) mutable {
-        if (!ec)
-          prom.set_value(size);
-        else
-          prom.set_exception(
-            std::make_exception_ptr(asyik::network_error("send error")));
-      });
-    return std::move(future);
-}
-
 int main()
 {
     auto as = asyik::make_service();
@@ -328,7 +308,10 @@ int main()
                        "Connection: keep-alive\r\n"
                        "Content-type: text/event-stream\r\n\r\n"
                        "retry: 5000\r\n\r\n";
-        async_send(stream,  asio::buffer(s.data(), s.length())).get();
+
+        // note: libasyik provide asyik::use_fiber_future to turn
+        // any boost asio's API into yield-enable fiber future
+        stream.async_write_some(asio::buffer(s.data(), s.length()), asyik::use_fiber_future).get();
 
         // now sending stream of events indefinitely
         int i=0;
@@ -337,7 +320,7 @@ int main()
           std::string body="event: foo\r\n"
                            "data: halo "+std::to_string(i++)+"\r\n"
                            "\r\n";
-          async_send(stream,  asio::buffer(body.data(), body.length())).get();
+          stream.async_write_some(asio::buffer(body.data(), body.length()), asyik::use_fiber_future).get();
           asyik::sleep_for(std::chrono::seconds(1));
         }
     });

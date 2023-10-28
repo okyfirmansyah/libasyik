@@ -677,25 +677,6 @@ TEST_CASE("Create https server and client, do some https communications",
   as->run();
 }
 
-template <typename Conn, typename... Args>
-auto async_send(Conn& con, Args&&... args) -> boost::fibers::future<std::size_t>
-{
-  boost::fibers::promise<std::size_t> promise;
-  auto future = promise.get_future();
-
-  con.async_write_some(
-      std::forward<Args>(args)...,
-      [prom = std::move(promise)](const boost::system::error_code& ec,
-                                  std::size_t size) mutable {
-        if (!ec)
-          prom.set_value(size);
-        else
-          prom.set_exception(
-              std::make_exception_ptr(asyik::network_error("send error")));
-      });
-  return future;
-}
-
 TEST_CASE("test manual handling of http requests", "[http]")
 {
   auto as = asyik::make_service(4);
@@ -725,8 +706,14 @@ TEST_CASE("test manual handling of http requests", "[http]")
             "Content-length: " +
             std::to_string(body.length()) + "\r\n\r\n";
 
-        async_send(stream, asio::buffer(s.data(), s.length())).get();
-        async_send(stream, asio::buffer(body.data(), body.length())).get();
+        stream
+            .async_write_some(asio::buffer(s.data(), s.length()),
+                              use_fiber_future)
+            .get();
+        stream
+            .async_write_some(asio::buffer(body.data(), body.length()),
+                              use_fiber_future)
+            .get();
       });
 
   server2->on_http_request(
@@ -746,8 +733,14 @@ TEST_CASE("test manual handling of http requests", "[http]")
 
         asyik::sleep_for(std::chrono::milliseconds(50));
 
-        async_send(stream, asio::buffer(s.data(), s.length())).get();
-        async_send(stream, asio::buffer(body.data(), body.length())).get();
+        stream
+            .async_write_some(asio::buffer(s.data(), s.length()),
+                              use_fiber_future)
+            .get();
+        stream
+            .async_write_some(asio::buffer(body.data(), body.length()),
+                              use_fiber_future)
+            .get();
       });
 
   asyik::sleep_for(std::chrono::milliseconds(100));
