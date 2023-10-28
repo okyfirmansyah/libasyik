@@ -62,6 +62,7 @@ class service : public std::enable_shared_from_this<service> {
   static std::atomic<uint32_t> async_task_terminated;
   static std::atomic<uint32_t> async_task_error;
   static std::atomic<uint32_t> async_queue_size;
+  static thread_local service_wptr active_service;
 
  public:
   ~service(){};
@@ -71,7 +72,7 @@ class service : public std::enable_shared_from_this<service> {
   service(service&&) = default;
   service& operator=(service&&) = default;
 
-  service(struct private_&&);
+  service(struct private_&&, int thread_num);
 
   static async_stats get_async_stats();
 
@@ -114,7 +115,10 @@ class service : public std::enable_shared_from_this<service> {
     auto future = p->get_future();
     auto t = std::atomic_load(&tasks);
     async_queue_size++;
-    t->push([f = std::forward<F>(fun), &args..., p]() mutable {
+    t->push([f = std::forward<F>(fun), as = weak_from_this(), &args...,
+             p]() mutable {
+      auto prev_as = service::active_service;
+      service::active_service = as;
       try {
         service_internal::helper<
             typename std::result_of<F(Args...)>::type>::set(p, f,
@@ -124,6 +128,7 @@ class service : public std::enable_shared_from_this<service> {
         async_task_error++;
         p->set_exception(std::current_exception());
       };
+      service::active_service = prev_as;
     });
 
     return future;
@@ -132,12 +137,18 @@ class service : public std::enable_shared_from_this<service> {
   void run();
   void stop()
   {
-    execute([i = &io_service, s = &stopped]() {
+    execute([s = &stopped, cv = &terminate_req_cond, i = &io_service,
+             n = io_service_thread_num]() {
       *s = true;
-      std::move(i);
+      if (!n)
+        std::move(i);
+      else
+        cv->notify_one();
     });
   };
   bool is_stopped() { return stopped; }
+
+  static service_ptr get_current_service() { return active_service.lock(); }
 
   boost::asio::io_context& get_io_service() { return io_service; };
   static void terminate();
@@ -162,12 +173,21 @@ class service : public std::enable_shared_from_this<service> {
 
   static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
   static std::shared_ptr<AixLog::Sink> default_log_sink;
+  int io_service_thread_num;
+
+  boost::fibers::condition_variable terminate_req_cond;
+  boost::fibers::mutex terminate_req_mtx;
 
  public:
-  friend service_ptr make_service();
+  friend service_ptr make_service(int thread_num);
 };
 
-service_ptr make_service();
+inline static service_ptr get_current_service()
+{
+  return service::get_current_service();
+}
+
+service_ptr make_service(int thread_num = 0);
 
 }  // namespace asyik
 

@@ -299,3 +299,49 @@ enter name: Oky
 2020-06-22 16-42-50.517 [Info] (operator()) async result=Oky
 root@desktop:/workspaces/test/build# 
 ```
+
+### async() and execute() as asynchronous promise-future pattern
+Libasyik's `async()` and `execute()` actually return [fiber::future](https://www.boost.org/doc/libs/1_83_0/libs/fiber/doc/html/fiber/synchronization/futures/future.html) so you can spawn them asynchronously and later wait synchronously for its completeness or return value using `.get()`:
+```c++
+#include "libasyik/service.hpp"
+
+int main()
+{
+  auto as = asyik::make_service();  
+
+  auto read_fu1 = as->execute(
+    [as]()->size_t
+    {
+      return read_some_data(...);
+    }
+  );
+
+  auto read_fu2 = as->async(
+    [as]()->size_t
+    {
+      return fread(...);
+    }
+  );
+  
+  // and now wait for both value final result
+  auto read_sz1=read_fu1.get();
+  auto read_sz2=read_fu2.get();
+}
+```
+
+### get executing service from the inside of async() and execute()
+You can get the originated `asyik::service` that the asynchronous tasks are dispatcher from. For example, you can then execute some follow up routine in the original service's thread:
+
+```c++
+  as->async([]() // also work for as->execute()
+  {
+    ...
+    auto as=asyik::get_current_service();
+    
+    // execute back the follow up routine in the original as's thread
+    as->execute([]()
+    {
+      ...
+    });
+  });
+```
