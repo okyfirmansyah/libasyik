@@ -256,7 +256,7 @@ int main()
   ...
 }
 ```
-Obviously, since all HTTP handler now run in one of multiple threads, any access to a shared variables or memory regions should be protected with synchronizations.
+Obviously, since all HTTP handler now run in one of multiple threads, any access to shared variables or memory regions should be protected with synchronizations.
 
 #### Set Incoming Request Body and Header Size Limits
 To protect against unbounded incoming data size(overflow or out of memory error), by default, incoming request header and body size are set to both 1MB each.  You can override these two settings using following:

@@ -2,7 +2,7 @@
 
 [![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
-**Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html) and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in an easy synchronous-like, user-threading model(fiber).
+**Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html), [**boost::beast**](https://github.com/boostorg/beast), and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in an easy synchronous-like, user-threading model(fiber).
 
 ```c++
 #include "libasyik/service.hpp"
@@ -26,7 +26,7 @@ void main()
 
 ## Features
 
- - Ergonomic concurrency programming model
+ - Ergonomic concurrent programming model
    - Based on lightweight thread using **Boost::Fiber** (easy to create **millions** of fibers!)
    - Programming in synchronous fashions, but lightweight enough to implement **1 connection=1 Process** to simplify network programming models
    - Wraps **boost::asio** and **boost::beast** asynchronous APIs into "synchronous" libasyik's API's that generally much easier to use and programs
@@ -135,6 +135,7 @@ void some_handler(asyik::service_ptr as)
      - [Websocket client](docs/http.md#websocket-client)
      - [Sending/Reading binary buffer](docs/http.md#websocket-client)
      - [Create SSL server](docs/http.md#create-ssl-server)
+     - [Create multi-thread server](docs/http.md#create-multi-thread-server)
      - [Set request body and header size limit](docs/http.md#set-incoming-request-body-and-header-size-limits)
      - [Apply rate limiter for HTTP API](docs/http.md#apply-rate-limiter-to-http-api)
      - [Handle HTTP connection and its responses manually](docs/http.md#advanced-topic-handle-http-connection-and-its-responses-manually)
@@ -146,7 +147,7 @@ void some_handler(asyik::service_ptr as)
  - Design/Rationale
    - [Why Fiber?](docs/why.md)
    - [Multithreading approach in Libasyik ](docs/designs.md)
-   - [Integrating your library to Libasyik](docs/integration.md)
+   - [Using Libasyik with other libraries](docs/integration.md)
  
  
 ## How to Build
