@@ -2,9 +2,7 @@
 
 [![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
-**Libasyik** is C++ microframework for highly scalable concurrent programming based on [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) and [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html). 
-
-Basic features containing web server, websockets, http clients, and database access functions.
+**Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html) and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in synchronous-like, user-threading model(fiber).
 
 ```c++
 #include "libasyik/service.hpp"
@@ -28,17 +26,19 @@ void main()
 
 ## Features
 
- - High scalability
+ - Ergonomic concurrency programming model
    - Based on lightweight thread using **Boost::Fiber** (easy to create **millions** of fibers!)
    - Programming in synchronous fashions, but lightweight enough to implement **1 connection=1 Process** to simplify network programming models
    - Wraps **boost::asio** and **boost::beast** asynchronous APIs into "synchronous" libasyik's API's that generally much easier to use and programs
- - HTTP server easy routing
-   - Pattern matching with arguments supported
+ - API to rapidly build HTTP-based service
+   - Pattern matching with arguments supported for HTTP server
    - Create websocket server as easy as HTTP request handlers
+   - API for HTTP and websocket clients
+   - API helper for doing rate limiting filtering
  - SQL access APIs based on **SOCI**
    - Support **PostgreSQL** and **SQLite** backends
    - Wrapped as "synchronous" APIs for lightweight threads/fibers
- - Build in logging based on [Aixlog](https://github.com/badaix/aixlog)
+ - Built in logging based on [Aixlog](https://github.com/badaix/aixlog)
    
 ## Examples
 
@@ -203,3 +203,25 @@ target_link_libraries(${PROJECT_NAME} Threads::Threads)
 find_package(OpenSSL REQUIRED)
 target_link_libraries(${PROJECT_NAME} OpenSSL::SSL)
 ```
+---
+# Credits
+
+This project is made possible by the community surrounding it and especially the wonderful people and projects listed in this document.
+
+## Contributors
+
+- [Oky Firmansyah](https://github.com/okyfirmansyah)
+- [Tri Wahyu](https://github.com/triwahyuu)
+- [Mufti Irawan Fikri](https://github.com/mifikri)
+- [Ahmad S.](https://github.com/ahmadudin)
+- [Januar C. Andaria](https://github.com/janucaria)
+
+
+## Libraries
+
+### [Boost](https://www.boost.org/)
+### [Boost Fibers](https://github.com/boostorg/fiber)
+### [Boost ASIO](https://github.com/chriskohlhoff/asio)
+### [Boost Beast](https://github.com/boostorg/beast)
+### [Lib SOCI](https://github.com/SOCI/soci)
+### [Catch2](https://github.com/catchorg/Catch2)
