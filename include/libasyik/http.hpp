@@ -36,7 +36,7 @@ void _TEST_invoke_http();
 
 static const size_t default_request_body_limit = 1 * 1024 * 1024;
 static const size_t default_request_header_limit = 1 * 1024 * 1024;
-static const size_t default_response_body_limit = 16 * 1024 * 1024;
+static const size_t default_response_body_limit = 64 * 1024 * 1024;
 static const size_t default_response_header_limit = 1 * 1024 * 1024;
 
 using http_route_args = std::vector<std::string>;
