@@ -319,6 +319,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
         headers(beast_request.base()),
         body(beast_request.body()),
         response(),
+        multipart_response(),
         manual_response(false){};
 
   http_beast_request beast_request;
@@ -358,7 +359,7 @@ class http_request : public std::enable_shared_from_this<http_request> {
     http_response_body& body;
     http_result result() const { return beast_response.result_int(); };
     void result(http_result res) { beast_response.result(res); };
-  } response;
+  } response, multipart_response;
 
   void activate_direct_response_handling() { manual_response = true; }
 
@@ -373,10 +374,10 @@ class http_request : public std::enable_shared_from_this<http_request> {
   template <typename StreamType>
   friend class http_connection;
 
-  template <typename D>
-  friend http_request_ptr http_easy_request(
+  template <typename D, typename F>
+  friend http_request_ptr http_easy_request_multipart(
       service_ptr as, int timeout_ms, string_view method, string_view url,
-      D&& data, const std::map<string_view, string_view>& headers);
+      D&& data, const std::map<string_view, string_view>& headers, F&& f);
 };
 
 class websocket : public std::enable_shared_from_this<websocket> {
@@ -511,14 +512,78 @@ class websocket_impl : public websocket {
   std::shared_ptr<StreamType> ws;
 };
 
-template <typename D>
-http_request_ptr http_easy_request(
+inline boost::optional<std::string> deduce_boundary(
+    beast::string_view content_type)
+{
+  boost::optional<std::string> result;
+
+  static std::regex r1{
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r2{
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary=([^"]+)$)regex",
+      std::regex_constants::icase};
+  static std::regex r3{
+      R"regex(^multipart/mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r4{
+      R"regex(^multipart/mixed-replace\s*;\s*boundary=([^"]+)$)regex",
+      std::regex_constants::icase};
+  static std::regex r5{
+      R"regex(^multipart/form-data\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r6{
+      R"regex(^multipart/form-data\s*;\s*boundary=([^"]+)$)regex",
+      std::regex_constants::icase};
+
+  auto match = std::cmatch();
+
+  if (std::regex_match(content_type.begin(), content_type.end(), match, r1) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r2) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r3) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r4) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r5) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r6)) {
+    result = match[1].str();
+  }
+
+  return result;
+};
+
+template <typename S, typename B>
+bool find_multipart_boundary(S& stream, B& buffer, const std::string& boundary)
+{
+  std::string boundary_line = boundary + "\r\n";
+  std::string terminate_line = boundary + "--\r\n";
+
+  while (1) {
+    string_view s(asio::buffer_cast<const char*>(buffer.data()), buffer.size());
+
+    auto pos = s.find(boundary_line);
+    if (pos > s.size()) {
+      if (s.find(terminate_line) < s.size()) {
+        // reach end of stream
+        return false;
+      }
+      auto b = buffer.prepare(65536);
+
+      auto sz = stream.async_read_some(b, asyik::use_fiber_future).get();
+      buffer.commit(sz);
+    } else {
+      buffer.consume(pos + boundary_line.length());
+      return true;
+    }
+  }
+}
+
+template <typename D, typename F>
+http_request_ptr http_easy_request_multipart(
     service_ptr as, int timeout_ms, string_view method, string_view url,
-    D&& data, const std::map<string_view, string_view>& headers)
+    D&& data, const std::map<string_view, string_view>& headers, F&& f)
 {
   http_url_scheme scheme;
 
-  BOOST_ASSERT(timeout_ms > 0);
+  BOOST_ASSERT(timeout_ms >= 0);
 
   if (http_analyze_url(url, scheme)) {
     auto req = std::make_shared<http_request>();
@@ -559,18 +624,84 @@ http_request_ptr http_easy_request(
       beast::ssl_stream<beast::tcp_stream> stream(
           as->get_io_service().get_executor(), ctx);
 
-      stream.next_layer().expires_after(std::chrono::milliseconds(timeout_ms));
+      if (timeout_ms)
+        stream.next_layer().expires_after(
+            std::chrono::milliseconds(timeout_ms));
+      else
+        stream.next_layer().expires_never();
 
       internal::socket::async_connect(beast::get_lowest_layer(stream), results)
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
       auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::string_body> resp_parser;
-      resp_parser.body_limit(default_response_body_limit);
-      resp_parser.header_limit(default_response_header_limit);
-      internal::http::async_read(stream, req->buffer, resp_parser).get();
-      req->response.beast_response = resp_parser.release();
+      http::response_parser<http::empty_body> empty_parser;
+      empty_parser.eager(false);
+      empty_parser.header_limit(default_response_header_limit);
+      empty_parser.body_limit(default_response_body_limit);
+      asyik::internal::http::async_read_header(stream, req->buffer,
+                                               empty_parser)
+          .get();
+
+      if (empty_parser.get().count("content-type") &&
+          (empty_parser.get().at("content-type").contains("multipart"))) {
+        // multipart handling
+
+        auto boundary =
+            deduce_boundary(empty_parser.get()[http::field::content_type]);
+
+        if (!boundary)
+          throw asyik::unexpected_error(
+              "HTTP response error, cannot get boundary token");
+
+        http::response_parser<http::string_body> resp_parser{
+            std::move(empty_parser)};
+        req->response.beast_response = resp_parser.release();
+
+        while (find_multipart_boundary(stream, req->buffer,
+                                       boundary.get_value_or(""))) {
+          http::response_parser<http::empty_body> empty_mpart_parser;
+          empty_mpart_parser.eager(false);
+          empty_mpart_parser.header_limit(default_response_header_limit);
+          empty_mpart_parser.body_limit(default_response_body_limit);
+
+          std::string status =
+              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
+          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
+
+          boost::beast::error_code ec;
+          empty_mpart_parser.put(asio::buffer(status), ec);
+
+          asyik::internal::http::async_read_header(stream, req->buffer,
+                                                   empty_mpart_parser)
+              .get();
+
+          if (!empty_mpart_parser.content_length())
+            throw asyik::unexpected_error(
+                "HTTP multipart without part content-length is not "
+                "supported!");
+
+          http::response_parser<http::string_body> resp_mpart_parser{
+              std::move(empty_mpart_parser)};
+          asyik::internal::http::async_read(stream, req->buffer,
+                                            resp_mpart_parser)
+              .get();
+
+          // proses resp_mpart_parser;
+          req->multipart_response.beast_response = resp_mpart_parser.release();
+
+          f(req);
+        }
+      } else {
+        // non-multipart handling
+        http::response_parser<http::string_body> resp_parser{
+            std::move(empty_parser)};
+
+        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
+            .get();
+
+        req->response.beast_response = resp_parser.release();
+      }
 
       try {
         w.get();
@@ -585,16 +716,82 @@ http_request_ptr http_easy_request(
     } else {
       beast::tcp_stream stream(as->get_io_service().get_executor());
 
-      stream.expires_after(std::chrono::milliseconds(timeout_ms));
+      if (timeout_ms)
+        stream.expires_after(std::chrono::milliseconds(timeout_ms));
+      else
+        stream.expires_never();
 
       internal::socket::async_connect(stream, results).get();
       auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::string_body> resp_parser;
-      resp_parser.body_limit(default_response_body_limit);
-      resp_parser.header_limit(default_response_header_limit);
-      internal::http::async_read(stream, req->buffer, resp_parser).get();
-      req->response.beast_response = resp_parser.release();
+      http::response_parser<http::empty_body> empty_parser;
+      empty_parser.eager(false);
+      empty_parser.header_limit(default_response_header_limit);
+      empty_parser.body_limit(default_response_body_limit);
+
+      asyik::internal::http::async_read_header(stream, req->buffer,
+                                               empty_parser)
+          .get();
+
+      if (empty_parser.get().count("content-type") &&
+          (empty_parser.get().at("content-type").contains("multipart"))) {
+        // Multipart handling
+
+        auto boundary =
+            deduce_boundary(empty_parser.get()[http::field::content_type]);
+
+        if (!boundary)
+          throw asyik::unexpected_error(
+              "HTTP response error, cannot get boundary token");
+
+        http::response_parser<http::string_body> resp_parser{
+            std::move(empty_parser)};
+        req->response.beast_response = resp_parser.release();
+
+        while (find_multipart_boundary(stream, req->buffer,
+                                       boundary.get_value_or(""))) {
+          http::response_parser<http::empty_body> empty_mpart_parser;
+          empty_mpart_parser.eager(false);
+          empty_mpart_parser.header_limit(default_response_header_limit);
+          empty_mpart_parser.body_limit(default_response_body_limit);
+
+          std::string status =
+              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
+          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
+
+          boost::beast::error_code ec;
+          empty_mpart_parser.put(asio::buffer(status), ec);
+
+          asyik::internal::http::async_read_header(stream, req->buffer,
+                                                   empty_mpart_parser)
+              .get();
+
+          if (!empty_mpart_parser.content_length())
+            throw asyik::unexpected_error(
+                "HTTP multipart without part content-length is not "
+                "supported!");
+
+          http::response_parser<http::string_body> resp_mpart_parser{
+              std::move(empty_mpart_parser)};
+          asyik::internal::http::async_read(stream, req->buffer,
+                                            resp_mpart_parser)
+              .get();
+
+          // proses resp_mpart_parser;
+          req->multipart_response.beast_response = resp_mpart_parser.release();
+
+          f(req);
+        }
+      } else {
+        // non-multipart handling
+        http::response_parser<http::string_body> resp_parser{
+            std::move(empty_parser)};
+
+        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
+            .get();
+
+        req->response.beast_response = resp_parser.release();
+      }
 
       beast::error_code ec;
       try {
@@ -610,6 +807,46 @@ http_request_ptr http_easy_request(
     }
   } else
     return nullptr;
+};
+
+template <typename D, typename F>
+http_request_ptr http_easy_request_multipart(
+    service_ptr as, string_view method, string_view url, D&& data,
+    const std::map<string_view, string_view>& headers, F&& f)
+{
+  return http_easy_request_multipart(as, 30000, method, url,
+                                     std::forward<D>(data), headers,
+                                     std::forward<F>(f));
+}
+
+template <typename D, typename F>
+http_request_ptr http_easy_request_multipart(service_ptr as, string_view method,
+                                             string_view url, D&& data, F&& f)
+{
+  return http_easy_request_multipart(as, method, url, std::forward<D>(data), {},
+                                     std::forward<F>(f));
+};
+
+template <typename F>
+http_request_ptr http_easy_request_multipart(service_ptr as, string_view method,
+                                             string_view url, F&& f)
+
+{
+  return http_easy_request_multipart(as, method, url, "", std::forward<F>(f));
+}
+
+template <typename D>
+http_request_ptr http_easy_request(
+    service_ptr as, int timeout_ms, string_view method, string_view url,
+    D&& data, const std::map<string_view, string_view>& headers)
+{
+  return http_easy_request_multipart(
+      as, timeout_ms, method, url, std::forward<D>(data), headers,
+      [](http_request_ptr req) {
+        throw asyik::unexpected_error(
+            "could not handle multipart response using http_easy_request(). "
+            "Use http_easy_request_multipart() instead");
+      });
 };
 
 template <typename D>

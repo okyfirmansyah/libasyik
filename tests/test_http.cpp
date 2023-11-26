@@ -184,22 +184,22 @@ TEST_CASE("Create http server and client, do some websocket communications",
     asyik::sleep_for(std::chrono::milliseconds(50));
 
     // TODO: temporarily disabled because the public echo server is unavailable
-    /*asyik::websocket_ptr ws = asyik::make_websocket_connection(as,
-    "wss://echo.websocket.org");
+    // asyik::websocket_ptr ws = asyik::make_websocket_connection(as,
+    // "wss://echo.websocket.org");
 
-    ws->set_keepalive_pings(true);
-    ws->set_idle_timeout(5);
-    ws->send_string("halo");
-    auto s = ws->get_string();
-    if (!s.compare("halo"))
-      success++;
+    // ws->set_keepalive_pings(true);
+    // ws->set_idle_timeout(5);
+    // ws->send_string("halo");
+    // auto s = ws->get_string();
+    // if (!s.compare("halo"))
+    //   success++;
 
-    ws->send_string("there");
-    s = ws->get_string();
-    if (!s.compare("there"))
-      success++;
+    // ws->send_string("there");
+    // s = ws->get_string();
+    // if (!s.compare("there"))
+    //   success++;
 
-    ws->close(websocket_close_code::normal, "closed normally");*/
+    // ws->close(websocket_close_code::normal, "closed normally");
     success += 2;
   });
 
@@ -868,6 +868,166 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
   LOG(INFO) << "testing multithread http server done\n";
   asyik::sleep_for(std::chrono::milliseconds(500));
 }
+
+TEST_CASE("Test for multipart", "[http]")
+{
+  auto as = asyik::make_service();
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4011, true);
+
+  // This holds the self-signed certificate used by the server
+  ssl::context ctx{ssl::context::tlsv12};
+  load_server_certificate(ctx);
+
+  auto server2 =
+      asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4012, true);
+
+  server->on_http_request(
+      "/multipart", "GET",
+#if __cplusplus >= 201402L
+      [&flag_http](auto req, auto args) {
+#else
+      [server](http_request_ptr req, const http_route_args& args) {
+#endif
+        auto connection = req->get_connection_handle(server);
+        auto& stream = connection->get_stream();
+        req->activate_direct_response_handling();
+
+        std::string body1{"100"};
+        std::string body2{"200"};
+        std::string body3{"300"};
+
+        std::string s =
+            "HTTP/1.1 200 OK\r\n"
+            "Connection: keep-alive\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Content-Type: "
+            "multipart/x-mixed-replace;boundary=--boundaryLibAsyik00001\r\n"
+            "X-Test-Reply: amiiin\r\n"
+            "\r\n"
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 1\r\n"
+            "Content-length: " +
+            std::to_string(body1.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body1 +
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 2\r\n"
+            "Content-length: " +
+            std::to_string(body2.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body2 +
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 3\r\n"
+            "Content-length: " +
+            std::to_string(body3.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body3 + "--boundaryLibAsyik00001--\r\n";
+
+        asio::async_write(stream, asio::buffer(s.data(), s.length()),
+                          use_fiber_future)
+            .get();
+      });
+
+  server2->on_http_request(
+      "/multipart", "GET",
+#if __cplusplus >= 201402L
+      [&flag_https](auto req, auto args) {
+#else
+      [server2](http_request_ptr req, const http_route_args& args) {
+#endif
+        auto connection = req->get_connection_handle(server2);
+        auto& stream = connection->get_stream();
+        req->activate_direct_response_handling();
+
+        std::string body1{"100"};
+        std::string body2{"200"};
+        std::string body3{"300"};
+
+        std::string s =
+            "HTTP/1.1 200 OK\r\n"
+            "Connection: keep-alive\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Content-Type: "
+            "multipart/x-mixed-replace;boundary=--boundaryLibAsyik00001\r\n"
+            "X-Test-Reply: amiiin\r\n"
+            "\r\n"
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 1\r\n"
+            "Content-length: " +
+            std::to_string(body1.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body1 +
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 2\r\n"
+            "Content-length: " +
+            std::to_string(body2.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body2 +
+            "--boundaryLibAsyik00001\r\n"
+            "x-mpart-id: 3\r\n"
+            "Content-length: " +
+            std::to_string(body3.length()) +
+            "\r\n"
+            "Content-type: image/jpeg\r\n"
+            "\r\n" +
+            body3 + "--boundaryLibAsyik00001--\r\n";
+
+        asio::async_write(stream, asio::buffer(s.data(), s.length()),
+                          use_fiber_future)
+            .get();
+      });
+
+  as->execute([as]() {
+    REQUIRE_THROWS_AS(
+        http_easy_request(as, "GET", "http://127.0.0.1:4011/multipart"),
+        asyik::unexpected_error);
+
+    http_easy_request_multipart(
+        as, "GET", "http://127.0.0.1:4011/multipart", [](http_request_ptr req) {
+          REQUIRE_FALSE(
+              req->response.headers["x-test-reply"].compare("amiiin"));
+          std::string id = req->multipart_response.headers["x-mpart-id"];
+          LOG(INFO) << "got multipart id=" << id << "\n";
+          std::string body = std::to_string(std::stoi(id) * 100);
+
+          REQUIRE_FALSE(req->multipart_response.body.compare(body));
+        });
+
+    // SSL Part
+    REQUIRE_THROWS_AS(
+        http_easy_request(as, "GET", "https://127.0.0.1:4012/multipart"),
+        asyik::unexpected_error);
+
+    http_easy_request_multipart(
+        as, "GET", "https://127.0.0.1:4012/multipart",
+        [](http_request_ptr req) {
+          REQUIRE_FALSE(
+              req->response.headers["x-test-reply"].compare("amiiin"));
+          std::string id = req->multipart_response.headers["x-mpart-id"];
+          LOG(INFO) << "got multipart id=" << id << "\n";
+          std::string body = std::to_string(std::stoi(id) * 100);
+
+          REQUIRE_FALSE(req->multipart_response.body.compare(body));
+        });
+
+    as->stop();
+  }  // namespace asyik
+  );
+
+  as->run();
+  LOG(INFO) << "testing multipart http client done\n";
+  asyik::sleep_for(std::chrono::milliseconds(500));
+}  // namespace asyik
 
 TEST_CASE("Test websocket binary", "[http]")
 {
