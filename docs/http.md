@@ -315,6 +315,31 @@ void main()
   }
 ```
 
+#### HTTP Client Get Multipart Response
+For now, libasyik only support receiving multipart response in client:
+```c++
+// http_easy_request() will throw if it get multipart response from the server
+auto req = http_easy_request(as, "GET", "https://127.0.0.1:4012/multipart")
+
+// use this instead:
+auto req = http_easy_request_multipart(as, "GET", "https://127.0.0.1:4012/multipart",[](http_request_ptr req) {
+          // this in line function will be called for each multipart found
+
+          // read main or parent headers:
+          std::string main_header = req->response.headers["x-test-header"];
+
+          // read each part's header fields and body:
+          std::string header = req->multipart_response.headers["content-type"];
+          std::string body = req->multipart_response.body;
+        });
+```
+
+Multipart interface above will be called incrementally for every part encountered. It is the responsibility of caller to accumulate all the data if required. This interface is designed to support long/persistent connection, for e.g supporting video streaming. In that case, http_easy_request_multipart should be called using the interface with timeout override.
+
+Note also that the interface similar to the http_easy_request, only the difference is the lambda function handling each multipart segments. You can use various override to send data, set headers or set the timeout. The returned req will behave like http_easy_request but only the header will be valid.
+
+To send multipart response from the server, for now libasyik only support it using manual handling on sending data down the stream(see the next section). You must serialize your own multipart HTTP message. You can use Boost::beast serializer library if you need more elaborate functionalities.
+
 #### Advanced Topic: Handle HTTP Connection and Its Responses Manually
 Sometimes we want to do something different that simple HTTP request and response, one use case is doing server side event stream(SSE) so the client can have mutiple datas/events, transmitted in realtime and on a single, long connection.
 
