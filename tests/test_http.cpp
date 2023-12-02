@@ -29,72 +29,80 @@ TEST_CASE("check http_analyze_url against URL cases")
   bool result;
   http_url_scheme scheme;
 
-  result = http_analyze_url("simple.com", scheme);
+  result = http_analyze_url("http://simple.com", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("simple.com"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 80);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("simple.com"));
+  REQUIRE(!scheme.target().length());
+  REQUIRE(scheme.port() == 80);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("Http://protspecify.co.id", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("protspecify.co.id"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 80);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("protspecify.co.id"));
+  REQUIRE(!scheme.target().length());
+  REQUIRE(scheme.port() == 80);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("https://prothttps.x.y.z/", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("prothttps.x.y.z"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 443);
-  REQUIRE(scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("prothttps.x.y.z"));
+  REQUIRE(!scheme.target().compare("/"));
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(scheme.is_ssl());
+
+  result = http_analyze_url("wss://prothttps.x.y.z", scheme);
+  REQUIRE(result);
+  REQUIRE(!scheme.host().compare("prothttps.x.y.z"));
+  REQUIRE(!scheme.target().length());
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(scheme.is_ssl());
 
   result = http_analyze_url("https://protandport.x:69", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("protandport.x"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 69);
-  REQUIRE(scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("protandport.x"));
+  REQUIRE(!scheme.target().length());
+  REQUIRE(scheme.port() == 69);
+  REQUIRE(scheme.is_ssl());
 
-  result = http_analyze_url("simple.x.y.z:443/check", scheme);
+  result = http_analyze_url("http://simple.x.y.z:443/check", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("simple.x.y.z"));
-  REQUIRE(!scheme.target.compare("/check"));
-  REQUIRE(scheme.port == 443);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("simple.x.y.z"));
+  REQUIRE(!scheme.target().compare("/check"));
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("http://simple.co.id:443/check", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("simple.co.id"));
-  REQUIRE(!scheme.target.compare("/check"));
-  REQUIRE(scheme.port == 443);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("simple.co.id"));
+  REQUIRE(!scheme.target().compare("/check"));
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("http://10.10.10.1:443/check", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.1"));
-  REQUIRE(!scheme.target.compare("/check"));
-  REQUIRE(scheme.port == 443);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.target().compare("/check"));
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("http://10.10.10.1/check?hehe", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.1"));
-  REQUIRE(!scheme.target.compare("/check?hehe"));
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.target().compare("/check?hehe"));
 
   result = http_analyze_url("http://10.10.10.1/check/?result=ok", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.1"));
-  REQUIRE(!scheme.target.compare("/check/?result=ok"));
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.target().compare("/check/?result=ok"));
 
   result = http_analyze_url(
-      "http://10.10.10.1/check/?result=ok&msg=nothing+important&msg2=ok%20done",
+      "http://10.10.10.1/check/"
+      "?result=ok&msg=nothing+important&msg2=ok%20done#page1",
       scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.1"));
-  REQUIRE(!scheme.target.compare(
-      "/check/?result=ok&msg=nothing+important&msg2=ok%20done"));
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.target().compare(
+      "/check/?result=ok&msg=nothing+important&msg2=ok%20done#page1"));
 
   result = http_analyze_url(
       "http://10.10.10.1/check/?result=ok&msg=nothing+important&msg2=ok done",
@@ -107,22 +115,40 @@ TEST_CASE("check http_analyze_url against URL cases")
   result = http_analyze_url("http://he he.com:232/check/", scheme);
   REQUIRE(!result);
 
-  result = http_analyze_url("10.10.10.1:443/", scheme);
+  result = http_analyze_url("http://10.10.10.1:443/", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.1"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 443);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.target().compare("/"));
+  REQUIRE(!scheme.username().length());
+  REQUIRE(!scheme.password().length());
+  REQUIRE(scheme.port() == 443);
+  REQUIRE(!scheme.is_ssl());
 
-  result = http_analyze_url("10.10.10.2", scheme);
+  result = http_analyze_url("http://test@10.10.10.1:443/", scheme);
   REQUIRE(result);
-  REQUIRE(!scheme.host.compare("10.10.10.2"));
-  REQUIRE(!scheme.target.compare("/"));
-  REQUIRE(scheme.port == 80);
-  REQUIRE(!scheme.is_ssl);
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.authority().compare("test@10.10.10.1:443"));
+  REQUIRE(!scheme.username().compare("test"));
+  REQUIRE(!scheme.password().length());
+
+  result = http_analyze_url("http://test:pwd%21001@10.10.10.1:443/", scheme);
+  REQUIRE(result);
+  REQUIRE(!scheme.host().compare("10.10.10.1"));
+  REQUIRE(!scheme.authority().compare("test:pwd%21001@10.10.10.1:443"));
+  REQUIRE(!scheme.username().compare("test"));
+  REQUIRE(!scheme.password().compare("pwd!001"));
+
+  result = http_analyze_url("http://10.10.10.2", scheme);
+  REQUIRE(result);
+  REQUIRE(!scheme.host().compare("10.10.10.2"));
+  REQUIRE(!scheme.target().length());
+  REQUIRE(scheme.port() == 80);
+  REQUIRE(!scheme.is_ssl());
 
   result = http_analyze_url("invalid://simple.com:443/check", scheme);
-  REQUIRE(!result);
+  REQUIRE(result);
+  REQUIRE(!scheme.get_url_view().scheme().compare("invalid"));
+  REQUIRE(scheme.get_url_view().scheme_id() == boost::urls::scheme::unknown);
 
   result = http_analyze_url("invalid:simple.com:443/check", scheme);
   REQUIRE(!result);
@@ -884,7 +910,7 @@ TEST_CASE("Test for multipart", "[http]")
   server->on_http_request(
       "/multipart", "GET",
 #if __cplusplus >= 201402L
-      [&flag_http](auto req, auto args) {
+      [server](auto req, auto args) {
 #else
       [server](http_request_ptr req, const http_route_args& args) {
 #endif
@@ -937,7 +963,7 @@ TEST_CASE("Test for multipart", "[http]")
   server2->on_http_request(
       "/multipart", "GET",
 #if __cplusplus >= 201402L
-      [&flag_https](auto req, auto args) {
+      [server2](auto req, auto args) {
 #else
       [server2](http_request_ptr req, const http_route_args& args) {
 #endif
@@ -1037,50 +1063,51 @@ TEST_CASE("Test websocket binary", "[http]")
   std::vector<uint8_t> buff;
   for (int i = 0; i < 1024; i++) buff.push_back((uint8_t)rand() % 256);
 
-  server->on_websocket(
-      "/binary_test", [&buff](websocket_ptr ws, const http_route_args& args) {
-        try {
-          auto s = ws->get_string();
-          REQUIRE(!s.compare("this is text"));
+  server->on_websocket("/binary_test", [&buff](websocket_ptr ws,
+                                               const http_route_args& args) {
+    try {
+      auto s = ws->get_string();
+      REQUIRE(!s.compare("this is text"));
 
-          std::vector<uint8_t> b;
-          b.resize(1024);
-          ws->read_basic_buffer(b);
-          REQUIRE(b == buff);
+      std::vector<uint8_t> b;
+      b.resize(1024);
+      ws->read_basic_buffer(b);
+      REQUIRE(b == buff);
 
-          auto s2 = ws->get_string();
-          REQUIRE(!s2.compare("again, this is text"));
+      auto s2 = ws->get_string();
+      REQUIRE(!s2.compare("again, this is text"));
 
-          try {
-            auto s3 = ws->get_string();
-            REQUIRE(false);
-          } catch (asyik::unexpected_error& e) {
-            LOG(INFO) << "catch exception because we got binary when we're "
-                         "actually expect text(expected)\n";
-          }
+      try {
+        auto s3 = ws->get_string();
+        REQUIRE(false);
+      } catch (asyik::unexpected_error& e) {
+        LOG(INFO) << "catch exception because we got binary when we're "
+                     "actually expect text(expected)\n";
+      }
 
-          auto s3 = ws->get_string();
-          REQUIRE(!s3.compare("third, this is text"));
+      auto s3 = ws->get_string();
+      REQUIRE(!s3.compare("third, this is text"));
 
-          std::vector<uint8_t> b2;
-          b2.resize(2048);
-          auto sz = ws->read_basic_buffer(b2);
-          b2.resize(sz);  // change actual resulting output buffer size
-          REQUIRE(b2 == buff);
+      std::vector<uint8_t> b2;
+      b2.resize(2048);
+      auto sz = ws->read_basic_buffer(b2);
+      b2.resize(sz);  // change actual resulting output buffer size
+      REQUIRE(b2 == buff);
 
-          try {
-            std::vector<uint8_t> b;
-            b.resize(512);
-            ws->read_basic_buffer(b);
-            REQUIRE(false);
-          } catch (asyik::network_error& e) {
-            LOG(INFO) << "got exception: " << e.what() << "(expected)\n";
-          }
-        } catch (...) {
-          LOG(INFO) << "got unexpected exception in handler binary_test\n";
-          REQUIRE(false);
-        }
-      });
+      try {
+        std::vector<uint8_t> b;
+        b.resize(512);
+        ws->read_basic_buffer(b);
+        REQUIRE(false);
+      } catch (boost::system::system_error& e) {
+        LOG(INFO) << "got exception: " << e.what() << "(expected)\n";
+      }
+    } catch (std::exception& e) {
+      LOG(INFO) << "got unexpected exception in handler binary_test, what()="
+                << e.what() << "\n";
+      REQUIRE(false);
+    }
+  });
 
   // check ws client timeout
   as->execute([as, &buff, server]() {

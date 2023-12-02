@@ -41,38 +41,34 @@ std::string internal::route_spec_to_regex(string_view route_spc)
   return regex_spec;
 }
 
-bool http_analyze_url(string_view url, http_url_scheme& scheme)
+bool http_analyze_url(string_view u, http_url_scheme& scheme)
 {
-  static std::regex re(
-      R"(^(http\:\/\/|https\:\/\/|ws\:\/\/|wss\:\/\/|)(([^\/\s\:]+)(:\d{1,5})|([^\/\s\:]+)())(\/[^\:\s]*|)$)",
-      std::regex_constants::icase);
-  static std::regex re2(R"(^(https|wss)\:\/\/)", std::regex_constants::icase);
+  namespace url = boost::urls;
+  boost::system::result<url::url_view> r = url::parse_uri(u);
 
-  std::smatch m;
-  std::string str{url};
-  if (std::regex_search(str, m, re)) {
-    // check if ssl or not ssl
-    if (m[1].str().compare("")) {
-      scheme.is_ssl = std::regex_match(m[1].str(), re2);
-    } else
-      scheme.is_ssl = false;
+  if (!r.has_error() && r.has_value()) {
+    scheme.uv = r.value();
 
-    // is there any port specification or not
-    if (m[3].str().length()) {
-      scheme.host = m[3].str();
-      scheme.port = std::atoi(&m[4].str().c_str()[1]);
-    } else {
-      scheme.host = m[5].str();
-      scheme.port = scheme.is_ssl ? 443 : 80;
+    if (!scheme.uv.host().length()) {
+      LOG(ERROR) << "error on http_analyze_url, missing URL host()\n";
+      return false;
     }
+    scheme.is_ssl_ = (scheme.uv.scheme_id() == url::scheme::https) ||
+                     (scheme.uv.scheme_id() == url::scheme::wss);
 
-    scheme.target = m[7].str();
-    if (!scheme.target.length()) scheme.target = "/";
+    scheme.port_ = scheme.uv.port_number();
+    if (!scheme.port_ && scheme.uv.has_scheme())
+      scheme.port_ = (scheme.is_ssl_ ? 443 : 80);
+    scheme.username_ = scheme.uv.user();
+    scheme.password_ = scheme.uv.password();
 
     return true;
-  } else
+  } else {
+    LOG(ERROR) << "error=" << r.error().message() << "\n";
     return false;
-}
+  }
+
+}  // namespace asyik
 
 http_server_ptr<http_stream_type> make_http_server(service_ptr as,
                                                    string_view addr,
@@ -151,11 +147,11 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
     tcp::resolver resolver(asio::make_strand(as->get_io_service()));
 
     tcp::resolver::results_type results =
-        internal::socket::async_resolve(resolver, scheme.host,
-                                        std::to_string(scheme.port))
+        internal::socket::async_resolve(resolver, std::string(scheme.host()),
+                                        std::to_string(scheme.port()))
             .get();
 
-    if (scheme.is_ssl) {
+    if (scheme.is_ssl()) {
       // The SSL context is required, and holds certificates
       ssl::context ctx(ssl::context::tlsv12_client);
 
@@ -169,8 +165,9 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
           beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
       auto new_ws = std::make_shared<websocket_impl<stream_type>>(
           websocket_impl<stream_type>::private_{},
-          as->get_io_service().get_executor(), scheme.host,
-          std::to_string(scheme.port), scheme.target);
+          as->get_io_service().get_executor(), scheme.host(),
+          std::to_string(scheme.port()),
+          scheme.target().length() ? scheme.target() : "/");
 
       new_ws->ws = std::make_shared<stream_type>(
           as->get_io_service().get_executor(), ctx);
@@ -204,14 +201,15 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
           }));
 
       // Perform the websocket handshake
-      if (scheme.port == 80 || scheme.port == 443)
-        internal::websocket::async_handshake(*new_ws->ws, scheme.host,
-                                             scheme.target)
+      if (scheme.port() == 80 || scheme.port() == 443)
+        internal::websocket::async_handshake(*new_ws->ws, scheme.host(),
+                                             scheme.target())
             .get();
       else
         internal::websocket::async_handshake(
-            *new_ws->ws, scheme.host + ":" + std::to_string(scheme.port),
-            scheme.target)
+            *new_ws->ws,
+            std::string(scheme.host()) + ":" + std::to_string(scheme.port()),
+            scheme.target().length() ? scheme.target() : "/")
             .get();
 
       return new_ws;
@@ -220,8 +218,8 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
       auto new_ws = std::make_shared<websocket_impl<stream_type>>(
           websocket_impl<
               beast::websocket::stream<beast::tcp_stream>>::private_{},
-          as->get_io_service().get_executor(), scheme.host,
-          std::to_string(scheme.port), scheme.target);
+          as->get_io_service().get_executor(), scheme.host(),
+          std::to_string(scheme.port()), scheme.target());
 
       new_ws->ws =
           std::make_shared<stream_type>(as->get_io_service().get_executor());
@@ -252,14 +250,16 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
           }));
 
       // Perform the websocket handshake
-      if (scheme.port == 80 || scheme.port == 443)
-        internal::websocket::async_handshake(*new_ws->ws, scheme.host,
-                                             scheme.target)
+      if (scheme.port() == 80 || scheme.port() == 443)
+        internal::websocket::async_handshake(
+            *new_ws->ws, scheme.host(),
+            scheme.target().length() ? scheme.target() : "/")
             .get();
       else
         internal::websocket::async_handshake(
-            *new_ws->ws, scheme.host + ":" + std::to_string(scheme.port),
-            scheme.target)
+            *new_ws->ws,
+            std::string(scheme.host()) + ":" + std::to_string(scheme.port()),
+            scheme.target())
             .get();
 
       return new_ws;

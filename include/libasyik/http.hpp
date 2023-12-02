@@ -93,10 +93,34 @@ http_request_ptr http_easy_request(
     D&& data, const std::map<string_view, string_view>& headers);
 
 struct http_url_scheme {
-  bool is_ssl;
-  std::string host;
-  uint16_t port;
-  std::string target;
+  boost::urls::url_view get_url_view() const { return uv; }
+
+  bool is_ssl() const { return is_ssl_; }
+  string_view host() const
+  {
+    return string_view(uv.encoded_host().data(), uv.encoded_host().length());
+  }
+  string_view authority() const
+  {
+    return string_view(uv.authority().data(), uv.authority().size());
+  }
+  string_view username() const { return username_; }
+  string_view password() const { return password_; }
+  uint16_t port() const { return port_; }
+  string_view target() const
+  {
+    return string_view(uv.encoded_resource().data(),
+                       uv.encoded_resource().size());
+  }
+
+ private:
+  boost::urls::url_view uv;
+  std::string username_;
+  std::string password_;
+  bool is_ssl_;
+  uint16_t port_;
+
+  friend bool http_analyze_url(string_view u, http_url_scheme& scheme);
 };
 
 bool http_analyze_url(string_view url, http_url_scheme& scheme);
@@ -588,10 +612,11 @@ http_request_ptr http_easy_request_multipart(
   if (http_analyze_url(url, scheme)) {
     auto req = std::make_shared<http_request>();
 
-    if (scheme.port == 80 || scheme.port == 443)
-      req->headers.set("Host", scheme.host);
+    if (scheme.port() == 80 || scheme.port() == 443)
+      req->headers.set("Host", scheme.host());
     else
-      req->headers.set("Host", scheme.host + ":" + std::to_string(scheme.port));
+      req->headers.set("Host", std::string(scheme.host()) + ":" +
+                                   std::to_string(scheme.port()));
     req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
     req->headers.set("Content-Type", "text/html");
 
@@ -600,18 +625,18 @@ http_request_ptr http_easy_request_multipart(
 
     req->body = std::forward<D>(data);
     req->method(method);
-    req->target(scheme.target);
+    req->target(scheme.target().length() ? scheme.target() : "/");
     req->beast_request.keep_alive(false);
 
     req->beast_request.prepare_payload();
 
     tcp::resolver resolver(as->get_io_service().get_executor());
     tcp::resolver::results_type results =
-        internal::socket::async_resolve(resolver, scheme.host,
-                                        std::to_string(scheme.port))
+        internal::socket::async_resolve(resolver, std::string(scheme.host()),
+                                        std::to_string(scheme.port()))
             .get();
 
-    if (scheme.is_ssl) {
+    if (scheme.is_ssl()) {
       // The SSL context is required, and holds certificates
       ssl::context ctx(ssl::context::tlsv12_client);
 
@@ -894,6 +919,10 @@ void http_connection<StreamType>::start()
                         body_limit = server->get_request_body_limit(),
                         header_limit =
                             server->get_request_header_limit()](void) {
+        // flag to ignore eos error since work has been
+        // done anyway
+        bool safe_to_close = false;
+
         try {
           ip::tcp::no_delay option(true);
           beast::get_lowest_layer(p->get_stream()).set_option(option);
@@ -912,6 +941,7 @@ void http_connection<StreamType>::start()
             asyik::internal::http::async_read_header(
                 p->get_stream(), asyik_req->buffer, empty_parser)
                 .get();
+            safe_to_close = false;
 
             http::request_parser<http::string_body> req_parser{
                 std::move(empty_parser)};
@@ -1012,6 +1042,8 @@ void http_connection<StreamType>::start()
               asyik::internal::http::async_write(p->get_stream(), res).get();
 
               if (!req.need_eof()) break;
+
+              safe_to_close = true;
             }
           }
           p->shutdown_ssl();
@@ -1029,6 +1061,12 @@ void http_connection<StreamType>::start()
               .get();
 
           p->shutdown_ssl();
+        } catch (asyik::already_closed_error& e) {
+          if (!safe_to_close) {
+            LOG(WARNING) << "End of stream exception is catched during client "
+                            "connection, reason: "
+                         << e.what() << "\n";
+          }
         } catch (std::exception& e) {
           LOG(WARNING)
               << "exception is catched during client connection, reason: "
