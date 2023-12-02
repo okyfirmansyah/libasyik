@@ -366,18 +366,26 @@ class fiber_promise_handler_ec_1 : public fiber_promise_creator<T> {
     else if ((ec == asio::error::timed_out) ||
              (ec == asio::error::operation_aborted) ||
              (ec == beast::error::timeout))
-      this->p_->set_exception(
-          std::make_exception_ptr(asyik::network_timeout_error(
-              ec, "timeout error during http::async_read")));
+      this->p_->set_exception(std::make_exception_ptr(
+          asyik::network_timeout_error(ec,
+                                       "[asyik::network_timeout_error]timeout "
+                                       "error during http::async_read")));
     else if (ec == beast::http::error::header_limit) {
       this->p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
-          ec, "incoming request header size is too large")));
+          ec,
+          "[asyik::overflow_error]incoming request header size is too large")));
     } else if (ec == beast::http::error::body_limit) {
       this->p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
-          ec, "incoming request body size is too large")));
+          ec,
+          "[asyik::overflow_error]incoming request body size is too large")));
+    } else if (ec == beast::http::error::end_of_stream) {
+      this->p_->set_exception(std::make_exception_ptr(
+          asyik::already_closed_error(ec,
+                                      "[asyik::already_closed_error]end of "
+                                      "stream or network connection closed")));
     } else
-      this->p_->set_exception(
-          std::make_exception_ptr(asyik::network_error(ec, ec.message())));
+      this->p_->set_exception(std::make_exception_ptr(
+          boost::system::system_error(ec, ec.message())));
   }
 };
 
