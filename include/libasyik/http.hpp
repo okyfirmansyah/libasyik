@@ -20,6 +20,7 @@
 #include "common.hpp"
 #include "error.hpp"
 #include "internal/asio_internal.hpp"
+#include "internal/digestauth.hpp"
 #include "service.hpp"
 
 namespace fibers = boost::fibers;
@@ -402,6 +403,10 @@ class http_request : public std::enable_shared_from_this<http_request> {
   friend http_request_ptr http_easy_request_multipart(
       service_ptr as, int timeout_ms, string_view method, string_view url,
       D&& data, const std::map<string_view, string_view>& headers, F&& f);
+
+  template <typename S, typename R, typename F>
+  friend boost::fibers::future<size_t> handle_client_request_response(
+      S& stream, R& req, http_url_scheme& scheme, F& f);
 };
 
 class websocket : public std::enable_shared_from_this<websocket> {
@@ -542,21 +547,26 @@ inline boost::optional<std::string> deduce_boundary(
   boost::optional<std::string> result;
 
   static std::regex r1{
-      R"regex(^multipart/x-mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
-      std::regex_constants::icase};
-  static std::regex r2{
-      R"regex(^multipart/x-mixed-replace\s*;\s*boundary=([^"]+)$)regex",
-      std::regex_constants::icase};
-  static std::regex r3{
       R"regex(^multipart/mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
       std::regex_constants::icase};
-  static std::regex r4{
+  static std::regex r2{
       R"regex(^multipart/mixed-replace\s*;\s*boundary=([^"]+)$)regex",
       std::regex_constants::icase};
+  static std::regex r3{
+      R"regex(^multipart/mixed\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r4{R"regex(^multipart/mixed\s*;\s*boundary=([^"]+)$)regex",
+                       std::regex_constants::icase};
   static std::regex r5{
-      R"regex(^multipart/form-data\s*;\s*boundary="([^"]+)"$)regex",
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
       std::regex_constants::icase};
   static std::regex r6{
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary=([^"]+)$)regex",
+      std::regex_constants::icase};
+  static std::regex r7{
+      R"regex(^multipart/form-data\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r8{
       R"regex(^multipart/form-data\s*;\s*boundary=([^"]+)$)regex",
       std::regex_constants::icase};
 
@@ -567,7 +577,9 @@ inline boost::optional<std::string> deduce_boundary(
       std::regex_match(content_type.begin(), content_type.end(), match, r3) ||
       std::regex_match(content_type.begin(), content_type.end(), match, r4) ||
       std::regex_match(content_type.begin(), content_type.end(), match, r5) ||
-      std::regex_match(content_type.begin(), content_type.end(), match, r6)) {
+      std::regex_match(content_type.begin(), content_type.end(), match, r6) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r7) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r8)) {
     result = match[1].str();
   }
 
@@ -600,6 +612,117 @@ bool find_multipart_boundary(S& stream, B& buffer, const std::string& boundary)
   }
 }
 
+template <typename S, typename Buf, typename BR, typename P>
+void handle_client_auth(S& stream, http_url_scheme& scheme, Buf& buffer,
+                        BR& beast_request, P& empty_parser)
+{
+  http::response_parser<http::string_body> resp_parser_unauth{
+      std::move(empty_parser)};
+
+  asyik::internal::http::async_read(stream, buffer, resp_parser_unauth).get();
+
+  digest_authenticator auth(
+      resp_parser_unauth.get()[http::field::www_authenticate],
+      scheme.username(), scheme.password(), scheme.target(),
+      beast_request.method_string(), resp_parser_unauth.get().body());
+
+  auth.generateAuthorization();
+  beast_request.insert("Authorization", auth.authorization());
+  beast_request.prepare_payload();
+
+  auto w = internal::http::async_write(stream, beast_request);
+
+  // reset the parser
+  using T = http::response_parser<http::empty_body>;
+  empty_parser.~T();
+  new (&empty_parser) T();
+
+  asyik::internal::http::async_read_header(stream, buffer, empty_parser).get();
+  w.get();
+}
+
+template <typename S, typename R, typename F>
+boost::fibers::future<size_t> handle_client_request_response(
+    S& stream, R& req, http_url_scheme& scheme, F& f)
+{
+  auto w = internal::http::async_write(stream, req->beast_request);
+
+  http::response_parser<http::empty_body> empty_parser;
+  empty_parser.eager(false);
+  empty_parser.header_limit(default_response_header_limit);
+  empty_parser.body_limit(default_response_body_limit);
+
+  asyik::internal::http::async_read_header(stream, req->buffer, empty_parser)
+      .get();
+
+  if ((empty_parser.get().result() ==
+       boost::beast::http::status::unauthorized) &&
+      scheme.username().length() && scheme.password().length()) {
+    w.get();
+    handle_client_auth(stream, scheme, req->buffer, req->beast_request,
+                       empty_parser);
+  }
+
+  if (empty_parser.get().count("content-type") &&
+      (empty_parser.get().at("content-type").contains("multipart"))) {
+    // Multipart handling
+
+    auto boundary =
+        deduce_boundary(empty_parser.get()[http::field::content_type]);
+
+    if (!boundary)
+      throw asyik::unexpected_error(
+          "HTTP response error, cannot get boundary token");
+
+    http::response_parser<http::string_body> resp_parser{
+        std::move(empty_parser)};
+    req->response.beast_response = resp_parser.release();
+
+    while (find_multipart_boundary(stream, req->buffer,
+                                   boundary.get_value_or(""))) {
+      http::response_parser<http::empty_body> empty_mpart_parser;
+      empty_mpart_parser.eager(false);
+      empty_mpart_parser.header_limit(default_response_header_limit);
+      empty_mpart_parser.body_limit(default_response_body_limit);
+
+      std::string status =
+          "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
+      status += " " + std::string(resp_parser.get().reason()) + "\r\n";
+
+      boost::beast::error_code ec;
+      empty_mpart_parser.put(asio::buffer(status), ec);
+
+      asyik::internal::http::async_read_header(stream, req->buffer,
+                                               empty_mpart_parser)
+          .get();
+
+      if (!empty_mpart_parser.content_length())
+        throw asyik::unexpected_error(
+            "HTTP multipart without part content-length is not "
+            "supported!");
+
+      http::response_parser<http::string_body> resp_mpart_parser{
+          std::move(empty_mpart_parser)};
+      asyik::internal::http::async_read(stream, req->buffer, resp_mpart_parser)
+          .get();
+
+      // proses resp_mpart_parser;
+      req->multipart_response.beast_response = resp_mpart_parser.release();
+
+      f(req);
+    }
+  } else {
+    // non-multipart handling
+    http::response_parser<http::string_body> resp_parser{
+        std::move(empty_parser)};
+
+    asyik::internal::http::async_read(stream, req->buffer, resp_parser).get();
+
+    req->response.beast_response = resp_parser.release();
+  }
+  return w;
+}
+
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
     service_ptr as, int timeout_ms, string_view method, string_view url,
@@ -618,15 +741,21 @@ http_request_ptr http_easy_request_multipart(
       req->headers.set("Host", std::string(scheme.host()) + ":" +
                                    std::to_string(scheme.port()));
     req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
-    req->headers.set("Content-Type", "text/html");
+    req->headers.set("Accept", "*/*");
 
     // user-overidden headers
     for (const auto& item : headers) req->headers.set(item.first, item.second);
 
     req->body = std::forward<D>(data);
+    if (req->body.length()) {
+      if (!req->headers.count(http::field::content_type))
+        req->headers.set("Content-Type", "text/html");
+    }
+    req->beast_request.version(11);
     req->method(method);
     req->target(scheme.target().length() ? scheme.target() : "/");
-    req->beast_request.keep_alive(false);
+    req->beast_request.keep_alive(true);
+    req->headers.set("Connection", "Keep-Alive");
 
     req->beast_request.prepare_payload();
 
@@ -658,78 +787,12 @@ http_request_ptr http_easy_request_multipart(
       internal::socket::async_connect(beast::get_lowest_layer(stream), results)
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
-      auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::empty_body> empty_parser;
-      empty_parser.eager(false);
-      empty_parser.header_limit(default_response_header_limit);
-      empty_parser.body_limit(default_response_body_limit);
-      asyik::internal::http::async_read_header(stream, req->buffer,
-                                               empty_parser)
-          .get();
-
-      if (empty_parser.get().count("content-type") &&
-          (empty_parser.get().at("content-type").contains("multipart"))) {
-        // multipart handling
-
-        auto boundary =
-            deduce_boundary(empty_parser.get()[http::field::content_type]);
-
-        if (!boundary)
-          throw asyik::unexpected_error(
-              "HTTP response error, cannot get boundary token");
-
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-        req->response.beast_response = resp_parser.release();
-
-        while (find_multipart_boundary(stream, req->buffer,
-                                       boundary.get_value_or(""))) {
-          http::response_parser<http::empty_body> empty_mpart_parser;
-          empty_mpart_parser.eager(false);
-          empty_mpart_parser.header_limit(default_response_header_limit);
-          empty_mpart_parser.body_limit(default_response_body_limit);
-
-          std::string status =
-              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
-          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
-
-          boost::beast::error_code ec;
-          empty_mpart_parser.put(asio::buffer(status), ec);
-
-          asyik::internal::http::async_read_header(stream, req->buffer,
-                                                   empty_mpart_parser)
-              .get();
-
-          if (!empty_mpart_parser.content_length())
-            throw asyik::unexpected_error(
-                "HTTP multipart without part content-length is not "
-                "supported!");
-
-          http::response_parser<http::string_body> resp_mpart_parser{
-              std::move(empty_mpart_parser)};
-          asyik::internal::http::async_read(stream, req->buffer,
-                                            resp_mpart_parser)
-              .get();
-
-          // proses resp_mpart_parser;
-          req->multipart_response.beast_response = resp_mpart_parser.release();
-
-          f(req);
-        }
-      } else {
-        // non-multipart handling
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-
-        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
-            .get();
-
-        req->response.beast_response = resp_parser.release();
-      }
+      auto is_write_done =
+          handle_client_request_response(stream, req, scheme, f);
 
       try {
-        w.get();
+        is_write_done.get();
         internal::ssl::async_shutdown(stream).get();
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
@@ -747,80 +810,13 @@ http_request_ptr http_easy_request_multipart(
         stream.expires_never();
 
       internal::socket::async_connect(stream, results).get();
-      auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::empty_body> empty_parser;
-      empty_parser.eager(false);
-      empty_parser.header_limit(default_response_header_limit);
-      empty_parser.body_limit(default_response_body_limit);
-
-      asyik::internal::http::async_read_header(stream, req->buffer,
-                                               empty_parser)
-          .get();
-
-      if (empty_parser.get().count("content-type") &&
-          (empty_parser.get().at("content-type").contains("multipart"))) {
-        // Multipart handling
-
-        auto boundary =
-            deduce_boundary(empty_parser.get()[http::field::content_type]);
-
-        if (!boundary)
-          throw asyik::unexpected_error(
-              "HTTP response error, cannot get boundary token");
-
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-        req->response.beast_response = resp_parser.release();
-
-        while (find_multipart_boundary(stream, req->buffer,
-                                       boundary.get_value_or(""))) {
-          http::response_parser<http::empty_body> empty_mpart_parser;
-          empty_mpart_parser.eager(false);
-          empty_mpart_parser.header_limit(default_response_header_limit);
-          empty_mpart_parser.body_limit(default_response_body_limit);
-
-          std::string status =
-              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
-          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
-
-          boost::beast::error_code ec;
-          empty_mpart_parser.put(asio::buffer(status), ec);
-
-          asyik::internal::http::async_read_header(stream, req->buffer,
-                                                   empty_mpart_parser)
-              .get();
-
-          if (!empty_mpart_parser.content_length())
-            throw asyik::unexpected_error(
-                "HTTP multipart without part content-length is not "
-                "supported!");
-
-          http::response_parser<http::string_body> resp_mpart_parser{
-              std::move(empty_mpart_parser)};
-          asyik::internal::http::async_read(stream, req->buffer,
-                                            resp_mpart_parser)
-              .get();
-
-          // proses resp_mpart_parser;
-          req->multipart_response.beast_response = resp_mpart_parser.release();
-
-          f(req);
-        }
-      } else {
-        // non-multipart handling
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-
-        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
-            .get();
-
-        req->response.beast_response = resp_parser.release();
-      }
+      auto is_write_done =
+          handle_client_request_response(stream, req, scheme, f);
 
       beast::error_code ec;
       try {
-        w.get();
+        is_write_done.get();
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,

@@ -4,6 +4,7 @@ add_library(${PROJECT_NAME} service.cpp http.cpp)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../external/cppcodec)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../external/Catch2/include)
 
 # add the required libraries here

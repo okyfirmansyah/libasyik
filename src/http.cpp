@@ -8,6 +8,7 @@
 #include "boost/fiber/all.hpp"
 #include "libasyik/common.hpp"
 #include "libasyik/internal/asio_internal.hpp"
+#include "libasyik/internal/digestauth.hpp"
 #include "libasyik/service.hpp"
 
 namespace ip = boost::asio::ip;

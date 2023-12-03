@@ -5,6 +5,36 @@
 namespace asyik {
 void _TEST_invoke_http(){};
 
+// TEST_CASE("check routing spec to regex spec conversion")
+// {
+//   auto as = asyik::make_service();
+//   as->execute([as]() {
+//     auto req = http_easy_request_multipart(
+//         as, 0, "GET",
+//         "https://admin:nodeflux%2112@192.168.1.64/ISAPI/Event/notification/"
+//         "alertStream",
+//         "", {}, [](http_request_ptr req) {
+//           LOG(INFO) << "content-type="
+//                     << req->multipart_response.headers["content-type"] <<
+//                     "\n";
+//           LOG(INFO) << "content-length="
+//                     << req->multipart_response.headers["content-length"]
+//                     << "\n\n";
+
+//           if (req->multipart_response.headers["content-type"].contains(
+//                   "application/xml")) {
+//             LOG(INFO) << req->multipart_response.body << "\n\n";
+//           } else
+//             LOG(INFO) << "---\n\n";
+//         });
+//     LOG(INFO) << "done\n";
+//     as->stop();
+//   }  // namespace asyik
+//   );
+
+//   as->run();
+// }
+
 TEST_CASE("check routing spec to regex spec conversion")
 {
   std::string spec = "/api/v1/face-match";
@@ -233,8 +263,8 @@ TEST_CASE("Create http server and client, do some websocket communications",
   as->execute([=, &success]() {
     asyik::sleep_for(std::chrono::milliseconds(50));
 
-    asyik::websocket_ptr ws =
-        asyik::make_websocket_connection(as, "ws://127.0.0.1:4004/0/name/hash");
+    asyik::websocket_ptr ws = asyik::make_websocket_connection(
+        as, "ws://justtest:nvm@127.0.0.1:4004/0/name/hash");
 
     ws->set_idle_timeout(1);
     try {
@@ -353,7 +383,8 @@ TEST_CASE("Create http server and client, do some http communications",
     REQUIRE(!x_test_reply.compare("amiiin"));
 
     req = asyik::http_easy_request(
-        as, "GET", "http://127.0.0.1:4004/any/999/?dummy1&dummy2=ha+ha");
+        as, "GET",
+        "http://nvm_user:nvm_pwd@127.0.0.1:4004/any/999/?dummy1&dummy2=ha+ha");
 
     REQUIRE(req->response.result() == 200);
     REQUIRE(!req->response.body.compare("-GET-999-"));
