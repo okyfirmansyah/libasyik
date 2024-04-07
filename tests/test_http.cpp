@@ -884,7 +884,7 @@ TEST_CASE("Test for multipart", "[http]")
   server->on_http_request(
       "/multipart", "GET",
 #if __cplusplus >= 201402L
-      [&flag_http](auto req, auto args) {
+      [server](auto req, auto args) {
 #else
       [server](http_request_ptr req, const http_route_args& args) {
 #endif
@@ -937,7 +937,7 @@ TEST_CASE("Test for multipart", "[http]")
   server2->on_http_request(
       "/multipart", "GET",
 #if __cplusplus >= 201402L
-      [&flag_https](auto req, auto args) {
+      [server2](auto req, auto args) {
 #else
       [server2](http_request_ptr req, const http_route_args& args) {
 #endif
