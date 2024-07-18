@@ -322,12 +322,16 @@ void asyik_set_error(const boost::system::error_code& ec, P& p_)
     p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
         ec,
         "[asyik::overflow_error]incoming request header size is too large")));
-  } else if (ec == beast::http::error::body_limit) {
+  } else if ((ec == beast::http::error::body_limit) ||
+             (ec == beast::websocket::error::buffer_overflow) ||
+             (ec == beast::websocket::error::message_too_big)) {
     p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
         ec, "[asyik::overflow_error]incoming request body size is too large")));
   } else if ((ec == beast::http::error::end_of_stream) ||
              (ec == asio::ssl::error::stream_truncated) ||
-             (ec == asio::error::connection_reset)) {
+             (ec == asio::error::connection_reset) ||
+             (ec == beast::websocket::error::closed) ||
+             (ec == asio::error::eof)) {
     p_->set_exception(std::make_exception_ptr(
         asyik::already_closed_error(ec,
                                     "[asyik::already_closed_error]end of "

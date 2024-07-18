@@ -405,8 +405,8 @@ class http_request : public std::enable_shared_from_this<http_request> {
       D&& data, const std::map<string_view, string_view>& headers, F&& f);
 
   template <typename S, typename R, typename F>
-  friend void handle_client_request_response(S& stream, int timeout_ms, R& req,
-                                             http_url_scheme& scheme, F& f);
+  friend boost::fibers::future<size_t> handle_client_request_response(
+      S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f);
 };
 
 class websocket : public std::enable_shared_from_this<websocket> {
@@ -642,8 +642,8 @@ void handle_client_auth(S& stream, http_url_scheme& scheme, Buf& buffer,
 }
 
 template <typename S, typename R, typename F>
-void handle_client_request_response(S& stream, int timeout_ms, R& req,
-                                    http_url_scheme& scheme, F& f)
+boost::fibers::future<size_t> handle_client_request_response(
+    S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f)
 {
   auto w = internal::http::async_write(stream, req->beast_request);
 
@@ -655,10 +655,10 @@ void handle_client_request_response(S& stream, int timeout_ms, R& req,
   asyik::internal::http::async_read_header(stream, req->buffer, empty_parser)
       .get();
 
-  w.get();
   if ((empty_parser.get().result() ==
        boost::beast::http::status::unauthorized) &&
       scheme.username().length() && scheme.password().length()) {
+    w.get();
     handle_client_auth(stream, scheme, req->buffer, req->beast_request,
                        empty_parser);
   }
@@ -723,6 +723,7 @@ void handle_client_request_response(S& stream, int timeout_ms, R& req,
 
     req->response.beast_response = resp_parser.release();
   }
+  return w;
 }
 
 template <typename D, typename F>
@@ -786,9 +787,11 @@ http_request_ptr http_easy_request_multipart(
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
 
-      handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      auto is_write_done =
+          handle_client_request_response(stream, timeout_ms, req, scheme, f);
 
       try {
+        is_write_done.get();
         internal::ssl::async_shutdown(stream).get();
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
@@ -804,10 +807,12 @@ http_request_ptr http_easy_request_multipart(
 
       internal::socket::async_connect(stream, results).get();
 
-      handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      auto is_write_done =
+          handle_client_request_response(stream, timeout_ms, req, scheme, f);
 
       beast::error_code ec;
       try {
+        is_write_done.get();
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
