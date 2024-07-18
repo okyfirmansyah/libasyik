@@ -1134,6 +1134,270 @@ TEST_CASE("Test websocket binary", "[http]")
   as->run();
 }
 
+TEST_CASE("Test WS close handling", "[http]")
+{
+  auto as = asyik::make_service(8);
+
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
+
+#if __cplusplus >= 201402L
+  server->on_websocket("/ws", [as](auto ws, auto args) {
+#else
+  server->on_websocket(
+      "/ws", [as](websocket_ptr ws, const http_route_args& args) {
+#endif
+    try {
+      REQUIRE(as == asyik::get_current_service());
+
+      ws->set_idle_timeout(2);
+      ws->set_keepalive_pings(true);
+
+      while (1) {
+        auto s = ws->get_string();
+        ws->send_string(s);
+
+        std::vector<uint8_t> b;
+        b.resize(1 * 1024 * 1024);
+        auto sz = ws->read_basic_buffer(b);
+        b.resize(sz);
+        ws->write_basic_buffer(b);
+      }
+    } catch (asyik::already_closed_error& e) {
+    } catch (asyik::network_timeout_error& e) {
+    } catch (boost::system::system_error& e) {
+      // after socker closed, either the handle will no longer valid
+      // or being used by other process
+      REQUIRE(((e.code() == boost::asio::error::bad_descriptor) ||
+               (e.code() == boost::asio::error::not_connected)));
+    } catch (std::exception& e) {
+      LOG(INFO) << "got ws exception, what: " << e.what() << "\n";
+      REQUIRE(false);
+    }
+  });
+
+#if __cplusplus >= 201402L
+  server->on_websocket("/ws_close", [as](auto ws, auto args) {
+#else
+  server->on_websocket("/ws_close",
+                       [as](websocket_ptr ws, const http_route_args& args) {
+#endif
+    ws->send_string("halo");
+  });
+
+  asyik::sleep_for(std::chrono::milliseconds(100));
+
+  std::thread t([as_host = as]() {
+    // todo: make this works for make_service(8)
+    auto as = asyik::make_service();
+
+    LOG(INFO) << "Testing ws close handling\n";
+    int cnt = 32;
+    for (int i = 0; i < 32; i++)
+      as->execute([as, &cnt]() {
+        LOG(INFO) << "Scenario 1: close without standby read\n";
+        for (int n = 0; n < 50; n++) {
+          try {
+            asyik::websocket_ptr ws =
+                asyik::make_websocket_connection(as, "ws://127.0.0.1:4007/ws");
+
+            std::shared_ptr<std::vector<uint8_t>> binary =
+                as->async([]() {
+                    auto binary = std::make_shared<std::vector<uint8_t>>();
+                    binary->resize(rand() % (128 * 1024) + 10240);
+                    memset(&(*binary)[0], ' ', binary->size());
+
+                    return binary;
+                  }).get();
+
+            for (int i = 0; i < 2; i++) {
+              ws->send_string("halo");
+              auto s = ws->get_string();
+              REQUIRE(!s.compare("halo"));
+
+              ws->write_basic_buffer(*binary);
+              std::vector<uint8_t> b;
+              b.resize(1 * 1024 * 1024);
+              auto sz = ws->read_basic_buffer(b);
+              b.resize(sz);
+              REQUIRE(std::equal(binary->begin(), binary->end(), b.begin()));
+              asyik::sleep_for(std::chrono::milliseconds(rand() % 5));
+            }
+
+            ws->close(websocket_close_code::normal, "closed normally");
+
+            asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket binary failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+          asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+        }
+
+        LOG(INFO) << "Scenario 2: close with standby read(pre-close)\n";
+        for (int n = 0; n < 50; n++) {
+          try {
+            asyik::websocket_ptr ws =
+                asyik::make_websocket_connection(as, "ws://127.0.0.1:4007/ws");
+
+            std::shared_ptr<std::vector<uint8_t>> binary =
+                as->async([]() {
+                    auto binary = std::make_shared<std::vector<uint8_t>>();
+                    binary->resize(rand() % (128 * 1024) + 10240);
+                    memset(&(*binary)[0], ' ', binary->size());
+
+                    return binary;
+                  }).get();
+
+            for (int i = 0; i < 2; i++) {
+              ws->send_string("halo");
+              auto s = ws->get_string();
+              REQUIRE(!s.compare("halo"));
+
+              ws->write_basic_buffer(*binary);
+              std::vector<uint8_t> b;
+              b.resize(1 * 1024 * 1024);
+              auto sz = ws->read_basic_buffer(b);
+              b.resize(sz);
+              REQUIRE(std::equal(binary->begin(), binary->end(), b.begin()));
+              asyik::sleep_for(std::chrono::milliseconds(rand() % 5));
+            }
+
+            as->execute([ws]() {
+              try {
+                while (1) ws->get_string();
+              } catch (const std::exception& e) {
+              }
+            });
+
+            asyik::sleep_for(std::chrono::milliseconds((rand() % 5) + 0));
+            ws->close(websocket_close_code::normal, "closed normally");
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket binary failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+          asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+        }
+
+        LOG(INFO) << "Scenario 3: close with standby read(after-close)\n";
+        for (int n = 0; n < 50; n++) {
+          try {
+            asyik::websocket_ptr ws =
+                asyik::make_websocket_connection(as, "ws://127.0.0.1:4007/ws");
+
+            std::shared_ptr<std::vector<uint8_t>> binary =
+                as->async([]() {
+                    auto binary = std::make_shared<std::vector<uint8_t>>();
+                    binary->resize(rand() % (128 * 1024) + 10240);
+                    memset(&(*binary)[0], ' ', binary->size());
+
+                    return binary;
+                  }).get();
+
+            for (int i = 0; i < 2; i++) {
+              ws->send_string("halo");
+              auto s = ws->get_string();
+              REQUIRE(!s.compare("halo"));
+
+              ws->write_basic_buffer(*binary);
+              std::vector<uint8_t> b;
+              b.resize(1 * 1024 * 1024);
+              auto sz = ws->read_basic_buffer(b);
+              b.resize(sz);
+              REQUIRE(std::equal(binary->begin(), binary->end(), b.begin()));
+              asyik::sleep_for(std::chrono::milliseconds(rand() % 5));
+            }
+
+            ws->close(websocket_close_code::normal, "closed normally");
+
+            try {
+              ws->get_string();
+            } catch (...) {
+            }
+
+            asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket binary failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+          asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+        }
+
+        LOG(INFO) << "Scenario 4: No close\n";
+        for (int n = 0; n < 50; n++) {
+          try {
+            asyik::websocket_ptr ws =
+                asyik::make_websocket_connection(as, "ws://127.0.0.1:4007/ws");
+
+            std::shared_ptr<std::vector<uint8_t>> binary =
+                as->async([]() {
+                    auto binary = std::make_shared<std::vector<uint8_t>>();
+                    binary->resize(rand() % (128 * 1024) + 10240);
+                    memset(&(*binary)[0], ' ', binary->size());
+
+                    return binary;
+                  }).get();
+
+            for (int i = 0; i < 2; i++) {
+              ws->send_string("halo");
+              auto s = ws->get_string();
+              REQUIRE(!s.compare("halo"));
+
+              ws->write_basic_buffer(*binary);
+              std::vector<uint8_t> b;
+              b.resize(1 * 1024 * 1024);
+              auto sz = ws->read_basic_buffer(b);
+              b.resize(sz);
+              REQUIRE(std::equal(binary->begin(), binary->end(), b.begin()));
+              asyik::sleep_for(std::chrono::milliseconds(rand() % 5));
+            }
+
+            asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket binary failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+          asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+        }
+
+        LOG(INFO) << "Scenario 5: abrupt close by server\n";
+        for (int n = 0; n < 25; n++) {
+          asyik::websocket_ptr ws = asyik::make_websocket_connection(
+              as, "ws://127.0.0.1:4007/ws_close");
+
+          try {
+            while (1) {
+              auto s = ws->get_string();
+              REQUIRE(!s.compare("halo"));
+            }
+          } catch (asyik::already_closed_error& e) {
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket binary failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+
+          try {
+            ws->close(websocket_close_code::normal, "closed normally");
+          } catch (asyik::network_timeout_error& e) {
+          } catch (std::exception& e) {
+            LOG(ERROR) << "websocket close failed. What: " << e.what() << "\n";
+            REQUIRE(false);
+          }
+
+          asyik::sleep_for(std::chrono::milliseconds(rand() % 10));
+        }
+
+        if (!(--cnt)) as->stop();
+      });
+
+    as->run();
+    as_host->stop();
+  });
+
+  t.detach();
+
+  as->run();
+}
+
 TEST_CASE("Test http url view", "[http_url_view]")
 {
   auto as = asyik::make_service();

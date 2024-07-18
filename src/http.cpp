@@ -165,13 +165,12 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
       using stream_type =
           beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
       auto new_ws = std::make_shared<websocket_impl<stream_type>>(
-          websocket_impl<stream_type>::private_{},
-          as->get_io_service().get_executor(), scheme.host(),
+          websocket_impl<stream_type>::private_{}, scheme.host(),
           std::to_string(scheme.port()),
           scheme.target().length() ? scheme.target() : "/");
 
       new_ws->ws = std::make_shared<stream_type>(
-          as->get_io_service().get_executor(), ctx);
+          asio::make_strand(as->get_io_service()), ctx);
 
       // Set the timeout for the operation
       beast::get_lowest_layer(*new_ws->ws)
@@ -219,11 +218,10 @@ websocket_ptr make_websocket_connection(service_ptr as, string_view url,
       auto new_ws = std::make_shared<websocket_impl<stream_type>>(
           websocket_impl<
               beast::websocket::stream<beast::tcp_stream>>::private_{},
-          as->get_io_service().get_executor(), scheme.host(),
-          std::to_string(scheme.port()), scheme.target());
+          scheme.host(), std::to_string(scheme.port()), scheme.target());
 
-      new_ws->ws =
-          std::make_shared<stream_type>(as->get_io_service().get_executor());
+      new_ws->ws = std::make_shared<stream_type>(
+          asio::make_strand(as->get_io_service()));
 
       // Set the timeout for the operation
       beast::get_lowest_layer(*new_ws->ws)

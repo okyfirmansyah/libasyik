@@ -281,19 +281,19 @@ class http_connection
 
   // constructor for server connection
   template <typename executor_type>
-  http_connection(struct private_&&, const executor_type& io_service,
+  http_connection(struct private_&&, executor_type&& io_service,
                   http_server_ptr<http_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(io_service),
+        socket(std::forward<executor_type>(io_service)),
         stream(std::move(socket)),
         is_websocket(false),
         is_server_connection(true){};
 
   template <typename executor_type>
-  http_connection(struct private_&&, const executor_type& io_service,
+  http_connection(struct private_&&, executor_type&& io_service,
                   http_server_ptr<https_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(io_service),
+        socket(std::forward<executor_type>(io_service)),
         ssl_context(server->ssl_context),
         stream(socket, *ssl_context),
         is_websocket(false),
@@ -460,14 +460,12 @@ class websocket_impl : public websocket {
   websocket_impl(websocket_impl&&) = default;
   websocket_impl& operator=(websocket_impl&&) = default;
 
-  template <typename executor_type>
-  websocket_impl(struct private_&&, const executor_type& io_service,
-                 string_view host_, string_view port_, string_view path_)
+  websocket_impl(struct private_&&, string_view host_, string_view port_,
+                 string_view path_)
       : websocket(host_, port_, path_){};
 
-  template <typename executor_type, typename ws_type, typename req_type>
-  websocket_impl(struct private_&&, const executor_type& io_service,
-                 ws_type&& ws, req_type&& req)
+  template <typename ws_type, typename req_type>
+  websocket_impl(struct private_&&, ws_type&& ws, req_type&& req)
       : websocket(std::forward<req_type>(req)), ws(std::forward<ws_type>(ws)){};
 
   // API
@@ -529,7 +527,15 @@ class websocket_impl : public websocket {
   virtual void close(websocket_close_code code, string_view reason)
   {
     const boost::beast::websocket::close_reason cr(code, reason);
-    internal::websocket::async_close(*ws, cr);
+
+    try {
+      asio::dispatch(ws->get_executor(), use_fiber_future([ws_ = ws, cr]() {
+                       beast::get_lowest_layer(*ws_).cancel();
+                       ws_->close(cr);
+                     }))
+          .get();
+    } catch (...) {
+    }
   }
 
  private:
@@ -779,7 +785,7 @@ http_request_ptr http_easy_request_multipart(
       ctx.set_verify_mode(ssl::verify_none);  //!!!
 
       beast::ssl_stream<beast::tcp_stream> stream(
-          as->get_io_service().get_executor(), ctx);
+          asio::make_strand(as->get_io_service()), ctx);
 
       stream.next_layer().expires_after(std::chrono::milliseconds(timeout_ms));
 
@@ -801,7 +807,7 @@ http_request_ptr http_easy_request_multipart(
 
       return req;
     } else {
-      beast::tcp_stream stream(as->get_io_service().get_executor());
+      beast::tcp_stream stream(asio::make_strand(as->get_io_service()));
 
       stream.expires_after(std::chrono::milliseconds(timeout_ms));
 
@@ -973,7 +979,6 @@ void http_connection<StreamType>::start()
                     websocket_impl<beast::websocket::stream<StreamType>>>(
                     typename websocket_impl<
                         beast::websocket::stream<StreamType>>::private_{},
-                    service->get_io_service().get_executor(),
                     std::make_shared<beast::websocket::stream<StreamType>>(
                         std::move(p->get_stream())),
                     asyik_req);
@@ -1088,17 +1093,15 @@ http_server<StreamType>::http_server(struct private_&&, service_ptr as,
 template <typename StreamType>
 void http_server<StreamType>::start_accept(asio::io_context& io_service)
 {
-  auto new_connection = std::make_shared<http_connection<StreamType>>(
-      typename http_connection<StreamType>::private_{},
-      io_service.get_executor(), this->shared_from_this());
-
   acceptor->async_accept(
-      beast::get_lowest_layer(new_connection->get_stream()),
-      [new_connection,
-       p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
-          const boost::system::error_code& error) {
+      asio::make_strand(io_service),
+      [p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
+          const boost::system::error_code& error, tcp::socket socket) {
         if (!p.expired() && !error) {
           auto ps = p.lock();
+          auto new_connection = std::make_shared<http_connection<StreamType>>(
+              typename http_connection<StreamType>::private_{},
+              std::move(socket), ps);
           new_connection->start();
           if (!ps->service.expired()) {
             auto service = ps->service.lock();
