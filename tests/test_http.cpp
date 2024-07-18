@@ -1187,8 +1187,7 @@ TEST_CASE("Test WS close handling", "[http]")
   asyik::sleep_for(std::chrono::milliseconds(100));
 
   std::thread t([as_host = as]() {
-    // todo: make this works for make_service(8)
-    auto as = asyik::make_service();
+    auto as = asyik::make_service(8);
 
     LOG(INFO) << "Testing ws close handling\n";
     int cnt = 32;

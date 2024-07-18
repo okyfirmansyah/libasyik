@@ -474,7 +474,16 @@ class websocket_impl : public websocket {
     std::string message;
     auto buffer = asio::dynamic_buffer(message);
 
-    internal::websocket::async_read(*ws, buffer).get();
+    // we need to call async ops thru strand for this op
+    // to be MT-safe
+    asio::dispatch(
+        ws->get_executor(),
+        use_fiber_future([ws_ = ws, &buffer]() -> fibers::future<size_t> {
+          return internal::websocket::async_read(*ws_, buffer);
+        }))
+        .get()
+        .get();
+
     if (ws->got_binary())
       throw asyik::unexpected_error(
           "unexpected binary message when get_string()");
@@ -496,7 +505,16 @@ class websocket_impl : public websocket {
     asio::mutable_buffers_1 mb(b.data(), b.size());
     auto buffer = beast::buffers_adaptor<asio::mutable_buffers_1>(mb);
 
-    return internal::websocket::async_read(*ws, buffer).get();
+    // we need to call async ops thru strand for this op
+    // to be MT-safe
+    return asio::dispatch(ws->get_executor(),
+                          use_fiber_future(
+                              [ws_ = ws, &buffer]() -> fibers::future<size_t> {
+                                return internal::websocket::async_read(*ws_,
+                                                                       buffer);
+                              }))
+        .get()
+        .get();
   }
 
   virtual void write_basic_buffer(const std::vector<uint8_t>& b)
