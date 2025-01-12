@@ -651,18 +651,7 @@ void handle_client_auth(S& stream, http_url_scheme& scheme, Buf& buffer,
       beast_request.method_string(), resp_parser_unauth.get().body());
 
   auth.generateAuthorization();
-  beast_request.insert("Authorization", auth.authorization());
-  beast_request.prepare_payload();
-
-  auto w = internal::http::async_write(stream, beast_request);
-
-  // reset the parser
-  using T = http::response_parser<http::empty_body>;
-  empty_parser.~T();
-  new (&empty_parser) T();
-
-  asyik::internal::http::async_read_header(stream, buffer, empty_parser).get();
-  w.get();
+  throw auth;
 }
 
 template <typename S, typename R, typename F>
@@ -753,7 +742,8 @@ boost::fibers::future<size_t> handle_client_request_response(
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
     service_ptr as, int timeout_ms, string_view method, string_view url,
-    D&& data, const std::map<string_view, string_view>& headers, F&& f)
+    D&& data, const std::map<string_view, string_view>& headers, F&& f,
+    const digest_authenticator* auth = nullptr)
 {
   http_url_scheme scheme;
 
@@ -769,6 +759,11 @@ http_request_ptr http_easy_request_multipart(
                                    std::to_string(scheme.port()));
     req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
     req->headers.set("Accept", "*/*");
+
+    if (auth) {
+      req->headers.set("Accept-Encoding", "identity");
+      req->headers.set("Authorization", auth->authorization());
+    }
 
     // user-overidden headers
     for (const auto& item : headers) req->headers.set(item.first, item.second);
@@ -811,9 +806,17 @@ http_request_ptr http_easy_request_multipart(
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
 
-      auto is_write_done =
-          handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      boost::fibers::future<size_t> is_write_done;
+      try {
+        is_write_done =
+            handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      } catch (digest_authenticator& auth) {
+        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
 
+        req = http_easy_request_multipart(as, timeout_ms, method, url,
+                                          std::forward<D>(data), headers,
+                                          std::forward<F>(f), &auth);
+      }
       try {
         is_write_done.get();
         internal::ssl::async_shutdown(stream).get();
@@ -831,8 +834,17 @@ http_request_ptr http_easy_request_multipart(
 
       internal::socket::async_connect(stream, results).get();
 
-      auto is_write_done =
-          handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      boost::fibers::future<size_t> is_write_done;
+      try {
+        is_write_done =
+            handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      } catch (digest_authenticator& auth) {
+        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
+
+        req = http_easy_request_multipart(as, timeout_ms, method, url,
+                                          std::forward<D>(data), headers,
+                                          std::forward<F>(f), &auth);
+      }
 
       beast::error_code ec;
       try {
