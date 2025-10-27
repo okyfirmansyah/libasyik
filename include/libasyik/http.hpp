@@ -280,22 +280,18 @@ class http_connection
   http_connection& operator=(http_connection&&) = default;
 
   // constructor for server connection
-  template <typename executor_type>
-  http_connection(struct private_&&, executor_type&& io_service,
+  http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<http_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(std::forward<executor_type>(io_service)),
-        stream(std::move(socket)),
+        stream(std::move(sock)),
         is_websocket(false),
         is_server_connection(true){};
 
-  template <typename executor_type>
-  http_connection(struct private_&&, executor_type&& io_service,
+  http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<https_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(std::forward<executor_type>(io_service)),
         ssl_context(server->ssl_context),
-        stream(socket, *ssl_context),
+        stream(std::move(sock), *ssl_context),
         is_websocket(false),
         is_server_connection(true){};
 
@@ -316,7 +312,6 @@ class http_connection
   inline void shutdown_ssl();
 
   http_server_wptr<StreamType> http_server;
-  tcp::socket socket;
   std::shared_ptr<ssl::context> ssl_context;
   StreamType stream;
   bool is_websocket;
@@ -547,11 +542,19 @@ class websocket_impl : public websocket {
     const boost::beast::websocket::close_reason cr(code, reason);
 
     try {
-      asio::dispatch(ws->get_executor(), use_fiber_future([ws_ = ws, cr]() {
-                       beast::get_lowest_layer(*ws_).cancel();
-                       ws_->close(cr);
-                     }))
-          .get();
+      auto f = asio::dispatch(
+                   ws->get_executor(),
+                   use_fiber_future([ws_ = ws, cr]() -> fibers::future<void> {
+                     beast::get_lowest_layer(*ws_).cancel();
+                     return internal::websocket::async_close(*ws_, cr);
+                   }))
+                   .get();
+      if (f.wait_for(std::chrono::seconds(2)) ==
+          fibers::future_status::timeout) {
+        return;
+      }
+
+      f.get();
     } catch (...) {
     }
   }
@@ -953,7 +956,7 @@ void http_connection<StreamType>::start()
 
         try {
           ip::tcp::no_delay option(true);
-          beast::get_lowest_layer(p->get_stream()).set_option(option);
+          beast::get_lowest_layer(p->get_stream()).socket().set_option(option);
 
           p->handshake_if_ssl();
 

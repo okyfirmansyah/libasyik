@@ -237,7 +237,7 @@ TEST_CASE("check http_analyze_url against URL cases")
 TEST_CASE("Create http server and client, do some websocket communications",
           "[websocket]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
@@ -522,7 +522,7 @@ TEST_CASE("Create http server and client, do some http communications",
 
 TEST_CASE("Test http client timeout", "[http]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
 
@@ -561,7 +561,7 @@ TEST_CASE("Test http client timeout", "[http]")
 TEST_CASE("Create https server and client, do some https communications",
           "[https]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   // The SSL context is required, and holds certificates
   ssl::context ctx{ssl::context::tlsv12};
@@ -705,7 +705,7 @@ TEST_CASE("Create https server and client, do some https communications",
 
 TEST_CASE("test manual handling of http requests", "[http]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   // The SSL context is required, and holds certificates
   ssl::context ctx{ssl::context::tlsv12};
@@ -1057,7 +1057,7 @@ TEST_CASE("Test for multipart", "[http]")
 
 TEST_CASE("Test websocket binary", "[http]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
   std::vector<uint8_t> buff;
@@ -1136,7 +1136,7 @@ TEST_CASE("Test websocket binary", "[http]")
 
 TEST_CASE("Test WS close handling", "[http]")
 {
-  auto as = asyik::make_service(8);
+  auto as = asyik::make_service();
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4007);
 
@@ -1187,7 +1187,7 @@ TEST_CASE("Test WS close handling", "[http]")
   asyik::sleep_for(std::chrono::milliseconds(100));
 
   std::thread t([as_host = as]() {
-    auto as = asyik::make_service(8);
+    auto as = asyik::make_service();
 
     LOG(INFO) << "Testing ws close handling\n";
     int cnt = 32;
@@ -1461,10 +1461,10 @@ TEST_CASE("Test http url view", "[http_url_view]")
     REQUIRE(req->response.result() == 404);
 
     server->close();
-    as->stop();
+    // as->stop();
   });
 
-  as->run();
+  as->run(true);
 }
 
 }  // namespace asyik

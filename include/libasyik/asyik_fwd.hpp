@@ -2,6 +2,7 @@
 #define LIBASYIK_ASYIK_FWD_HPP
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
 #include <memory>
 
@@ -33,8 +34,8 @@ using http_request_ptr = std::shared_ptr<http_request>;
 using http_request_wptr = std::weak_ptr<http_request>;
 using http_result = uint16_t;
 
-using http_stream_type = boost::asio::ip::tcp::socket;
-using https_stream_type = boost::beast::ssl_stream<http_stream_type&>;
+using http_stream_type = boost::beast::tcp_stream;
+using https_stream_type = boost::beast::ssl_stream<http_stream_type>;
 
 class sql_pool;
 using sql_pool_wptr = std::weak_ptr<sql_pool>;

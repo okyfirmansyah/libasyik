@@ -84,7 +84,7 @@ inline void load_server_certificate(boost::asio::ssl::context& ctx)
 
 TEST_CASE("Stress Test HTTP", "[http]")
 {
-  auto as = asyik::make_service(8);
+  auto as = asyik::make_service();
 
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
@@ -159,7 +159,7 @@ TEST_CASE("Stress Test HTTP", "[http]")
   asyik::sleep_for(std::chrono::milliseconds(100));
 
   std::thread t([]() {
-    auto as = asyik::make_service(8);
+    auto as = asyik::make_service();
     as->execute([as]() {
       while (1) {
         auto req = asyik::http_easy_request(
