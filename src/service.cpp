@@ -1,6 +1,7 @@
 #include "libasyik/service.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <regex>
 
@@ -103,7 +104,17 @@ void service::run(bool stop_on_complete)
 
 void service::init_workers()
 {
-  int pool_size = std::thread::hardware_concurrency() * 2;
+  // Get thread multiplier from environment variable, default to 5
+  int multiplier = 5;
+  const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
+  if (env_multiplier != nullptr) {
+    multiplier = std::atoi(env_multiplier);
+    if (multiplier <= 0) {
+      multiplier = 5;  // fallback to default if invalid value
+    }
+  }
+
+  int pool_size = std::thread::hardware_concurrency() * multiplier;
   std::atomic_store(
       &tasks,
       std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
