@@ -242,12 +242,18 @@ TEST_CASE("Create http server and client, do some websocket communications",
   auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
 
 #if __cplusplus >= 201402L
-  server->on_websocket("/<int>/name/<string>", [as](auto ws, auto args) {
+  server->on_websocket("/<int>/name/<string>", [as, server](auto ws,
+                                                            auto args) {
 #else
-  server->on_websocket("/<int>/name/<string>",
-                       [as](websocket_ptr ws, const http_route_args& args) {
+  server->on_websocket("/<int>/name/<string>", [as, server](
+                                                   websocket_ptr ws,
+                                                   const http_route_args&
+                                                       args) {
 #endif
     REQUIRE(as == asyik::get_current_service());
+    auto ep = ws->request->get_connection_handle(server)->get_remote_endpoint();
+    LOG(INFO) << "new websocket connection from " << ep.address().to_string()
+              << "\n";
 
     ws->set_idle_timeout(2);
     ws->set_keepalive_pings(true);

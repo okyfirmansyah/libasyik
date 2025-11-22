@@ -285,7 +285,9 @@ class http_connection
       : http_server(http_server_wptr<StreamType>(server)),
         stream(std::move(sock)),
         is_websocket(false),
-        is_server_connection(true){};
+        is_server_connection(true),
+        remote_endpoint(
+            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
 
   http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<https_stream_type> server)
@@ -293,7 +295,9 @@ class http_connection
         ssl_context(server->ssl_context),
         stream(std::move(sock), *ssl_context),
         is_websocket(false),
-        is_server_connection(true){};
+        is_server_connection(true),
+        remote_endpoint(
+            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
 
   // constructor for client connection
   // template <typename executor_type>
@@ -305,6 +309,7 @@ class http_connection
   //       is_server_connection(false){};
 
   StreamType& get_stream() { return stream; };
+  tcp::endpoint get_remote_endpoint() const { return remote_endpoint; };
 
  private:
   void start();
@@ -316,6 +321,7 @@ class http_connection
   StreamType stream;
   bool is_websocket;
   bool is_server_connection;
+  tcp::endpoint remote_endpoint;
 
   template <typename S>
   friend class http_server;
