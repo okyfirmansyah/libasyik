@@ -1,8 +1,10 @@
 #ifndef LIBASYIK_ASYIK_SQL_HPP
 #define LIBASYIK_ASYIK_SQL_HPP
 
+#include <functional>
 #include <list>
 #include <string>
+#include <unordered_map>
 
 #include "aixlog.hpp"
 #include "asyik_fwd.hpp"
@@ -122,6 +124,11 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
  public:
   ~sql_session()
   {
+    // ensure any active LISTEN handlers are removed and watcher stopped
+    try {
+      unlisten_all();
+    } catch (...) {
+    }
     if (auto p = pool.lock()) {
       std::lock_guard<fibers::mutex> l(p->mtx_);
       p->soci_sessions.push_back(std::move(soci_session));
@@ -134,6 +141,21 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
   sql_session& operator=(sql_session&&) = default;
 
   sql_session(struct private_){};
+
+  using notify_handler_t = std::function<void(const std::string& channel,
+                                              const std::string& payload)>;
+
+  // Start listening on a Postgre channel. The handler will be invoked
+  // whenever a notification on `channel` is received. This only declares
+  // the interface; the implementation is postgres-specific and will be
+  // provided in the .cpp file.
+  void listen(const std::string& channel, notify_handler_t handler);
+
+  // Stop listening on a previously listened channel.
+  void unlisten(const std::string& channel);
+
+  // Stop listening on all channels.
+  void unlisten_all();
 
   template <typename... Args>
   void query(string_view s, Args&&... args)
@@ -155,6 +177,13 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
 
  public:
   std::unique_ptr<soci::session> soci_session;
+
+  // notification handlers registered via `listen`.
+  fibers::mutex notify_mtx;
+  std::unordered_map<std::string, notify_handler_t> notify_handlers;
+  // Asio stream descriptor used to watch libpq socket (created when needed).
+  std::unique_ptr<asio::posix::stream_descriptor> notify_stream;
+  bool notify_running = false;
 
   friend class sql_pool;
 };

@@ -81,3 +81,93 @@ void some_handler(asyik::service_ptr as, int id, int id2)
   }
 }
 ```
+
+#### Listening for notifications (PostgreSQL LISTEN / NOTIFY)
+
+The library exposes a small, convenient wrapper on top of PostgreSQL's
+LISTEN/NOTIFY mechanism via `sql_session`:
+
+- `void listen(const std::string& channel, notify_handler_t handler)`
+  - Start listening on `channel`. `handler` is called when a notification
+    for that channel arrives: `handler(channel, payload)`.
+- `void unlisten(const std::string& channel)`
+  - Stop listening on `channel`.
+- `void unlisten_all()`
+  - Stop listening on all channels and cancel background watchers.
+
+Implementation notes:
+
+- The listen/watch implementation uses libpq's socket together with
+  `boost::asio::posix::stream_descriptor` to wait for notifications without
+  busy-polling. Notification handlers are dispatched through the session's
+  `service` so they execute in the same worker context as other async tasks.
+- `sql_session`'s destructor calls `unlisten_all()` to ensure the watcher is
+  stopped and handlers are cleared before the underlying SOCI session is
+  returned to the pool.
+- Channel names should be simple, trusted identifiers (alphanumeric and
+  underscores). If channel names are constructed from untrusted input, quote
+  or validate them to avoid SQL injection.
+
+Example — single channel
+```c++
+// assume `as` is a service_ptr and `pool` is a sql_pool_ptr
+auto ses = pool->get_session(as);
+
+ses->listen("my_channel", [](const std::string& channel,
+                              const std::string& payload) {
+  // runs on the service worker
+  std::cout << "got notify on " << channel << ": " << payload << "\n";
+});
+
+// send a notification from another session
+auto sender = pool->get_session(as);
+sender->query("NOTIFY my_channel, 'hello_world';");
+
+// later, stop listening
+ses->unlisten("my_channel");
+```
+
+Example — multiple channels and threads
+```c++
+auto listener = pool->get_session(as);
+
+std::atomic<int> received{0};
+std::mutex mtx;
+std::condition_variable cv;
+
+for (const auto &ch : {"chan1","chan2","chan3"}) {
+  listener->listen(ch, [&](const std::string& channel, const std::string& payload){
+    {
+      std::lock_guard<std::mutex> g(mtx);
+      ++received;
+    }
+    cv.notify_one();
+  });
+}
+
+// spawn multiple threads that notify different channels
+std::vector<std::thread> threads;
+for (int i = 0; i < 4; ++i) {
+  threads.emplace_back([pool, as, i]() {
+    auto s = pool->get_session(as);
+    std::string ch = (i % 2 == 0) ? "chan1" : "chan2";
+    s->query(std::string("NOTIFY ") + ch + ", 'p" + std::to_string(i) + "';");
+  });
+}
+
+// wait for notifications (simple timeout)
+{
+  std::unique_lock<std::mutex> lk(mtx);
+  cv.wait_for(lk, std::chrono::seconds(5), [&]{ return received.load() >= 4; });
+}
+
+for (auto &t : threads) t.join();
+
+listener->unlisten_all();
+```
+
+Quick tips
+- For local testing start Postgres quickly with Docker:
+  `docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine`
+- Tests in this repository include a simple `LISTEN/NOTIFY` test in
+  `tests/test_sql.cpp` demonstrating usage and thread-safety.
