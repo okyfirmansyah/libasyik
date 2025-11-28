@@ -20,6 +20,7 @@
 #include "common.hpp"
 #include "error.hpp"
 #include "internal/asio_internal.hpp"
+#include "internal/digestauth.hpp"
 #include "service.hpp"
 
 namespace fibers = boost::fibers;
@@ -93,10 +94,34 @@ http_request_ptr http_easy_request(
     D&& data, const std::map<string_view, string_view>& headers);
 
 struct http_url_scheme {
-  bool is_ssl;
-  std::string host;
-  uint16_t port;
-  std::string target;
+  boost::urls::url_view get_url_view() const { return uv; }
+
+  bool is_ssl() const { return is_ssl_; }
+  string_view host() const
+  {
+    return string_view(uv.encoded_host().data(), uv.encoded_host().length());
+  }
+  string_view authority() const
+  {
+    return string_view(uv.authority().data(), uv.authority().size());
+  }
+  string_view username() const { return username_; }
+  string_view password() const { return password_; }
+  uint16_t port() const { return port_; }
+  string_view target() const
+  {
+    return string_view(uv.encoded_resource().data(),
+                       uv.encoded_resource().size());
+  }
+
+ private:
+  boost::urls::url_view uv;
+  std::string username_;
+  std::string password_;
+  bool is_ssl_;
+  uint16_t port_;
+
+  friend bool http_analyze_url(string_view u, http_url_scheme& scheme);
 };
 
 bool http_analyze_url(string_view url, http_url_scheme& scheme);
@@ -255,24 +280,24 @@ class http_connection
   http_connection& operator=(http_connection&&) = default;
 
   // constructor for server connection
-  template <typename executor_type>
-  http_connection(struct private_&&, const executor_type& io_service,
+  http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<http_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(io_service),
-        stream(std::move(socket)),
+        stream(std::move(sock)),
         is_websocket(false),
-        is_server_connection(true){};
+        is_server_connection(true),
+        remote_endpoint(
+            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
 
-  template <typename executor_type>
-  http_connection(struct private_&&, const executor_type& io_service,
+  http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<https_stream_type> server)
       : http_server(http_server_wptr<StreamType>(server)),
-        socket(io_service),
         ssl_context(server->ssl_context),
-        stream(socket, *ssl_context),
+        stream(std::move(sock), *ssl_context),
         is_websocket(false),
-        is_server_connection(true){};
+        is_server_connection(true),
+        remote_endpoint(
+            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
 
   // constructor for client connection
   // template <typename executor_type>
@@ -284,6 +309,7 @@ class http_connection
   //       is_server_connection(false){};
 
   StreamType& get_stream() { return stream; };
+  tcp::endpoint get_remote_endpoint() const { return remote_endpoint; };
 
  private:
   void start();
@@ -291,11 +317,11 @@ class http_connection
   inline void shutdown_ssl();
 
   http_server_wptr<StreamType> http_server;
-  tcp::socket socket;
   std::shared_ptr<ssl::context> ssl_context;
   StreamType stream;
   bool is_websocket;
   bool is_server_connection;
+  tcp::endpoint remote_endpoint;
 
   template <typename S>
   friend class http_server;
@@ -378,6 +404,10 @@ class http_request : public std::enable_shared_from_this<http_request> {
   friend http_request_ptr http_easy_request_multipart(
       service_ptr as, int timeout_ms, string_view method, string_view url,
       D&& data, const std::map<string_view, string_view>& headers, F&& f);
+
+  template <typename S, typename R, typename F>
+  friend boost::fibers::future<size_t> handle_client_request_response(
+      S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f);
 };
 
 class websocket : public std::enable_shared_from_this<websocket> {
@@ -431,14 +461,12 @@ class websocket_impl : public websocket {
   websocket_impl(websocket_impl&&) = default;
   websocket_impl& operator=(websocket_impl&&) = default;
 
-  template <typename executor_type>
-  websocket_impl(struct private_&&, const executor_type& io_service,
-                 string_view host_, string_view port_, string_view path_)
+  websocket_impl(struct private_&&, string_view host_, string_view port_,
+                 string_view path_)
       : websocket(host_, port_, path_){};
 
-  template <typename executor_type, typename ws_type, typename req_type>
-  websocket_impl(struct private_&&, const executor_type& io_service,
-                 ws_type&& ws, req_type&& req)
+  template <typename ws_type, typename req_type>
+  websocket_impl(struct private_&&, ws_type&& ws, req_type&& req)
       : websocket(std::forward<req_type>(req)), ws(std::forward<ws_type>(ws)){};
 
   // API
@@ -447,7 +475,16 @@ class websocket_impl : public websocket {
     std::string message;
     auto buffer = asio::dynamic_buffer(message);
 
-    internal::websocket::async_read(*ws, buffer).get();
+    // we need to call async ops thru strand for this op
+    // to be MT-safe
+    asio::dispatch(
+        ws->get_executor(),
+        use_fiber_future([ws_ = ws, &buffer]() -> fibers::future<size_t> {
+          return internal::websocket::async_read(*ws_, buffer);
+        }))
+        .get()
+        .get();
+
     if (ws->got_binary())
       throw asyik::unexpected_error(
           "unexpected binary message when get_string()");
@@ -469,7 +506,16 @@ class websocket_impl : public websocket {
     asio::mutable_buffers_1 mb(b.data(), b.size());
     auto buffer = beast::buffers_adaptor<asio::mutable_buffers_1>(mb);
 
-    return internal::websocket::async_read(*ws, buffer).get();
+    // we need to call async ops thru strand for this op
+    // to be MT-safe
+    return asio::dispatch(ws->get_executor(),
+                          use_fiber_future(
+                              [ws_ = ws, &buffer]() -> fibers::future<size_t> {
+                                return internal::websocket::async_read(*ws_,
+                                                                       buffer);
+                              }))
+        .get()
+        .get();
   }
 
   virtual void write_basic_buffer(const std::vector<uint8_t>& b)
@@ -500,7 +546,23 @@ class websocket_impl : public websocket {
   virtual void close(websocket_close_code code, string_view reason)
   {
     const boost::beast::websocket::close_reason cr(code, reason);
-    internal::websocket::async_close(*ws, cr);
+
+    try {
+      auto f = asio::dispatch(
+                   ws->get_executor(),
+                   use_fiber_future([ws_ = ws, cr]() -> fibers::future<void> {
+                     beast::get_lowest_layer(*ws_).cancel();
+                     return internal::websocket::async_close(*ws_, cr);
+                   }))
+                   .get();
+      if (f.wait_for(std::chrono::seconds(2)) ==
+          fibers::future_status::timeout) {
+        return;
+      }
+
+      f.get();
+    } catch (...) {
+    }
   }
 
  private:
@@ -518,21 +580,26 @@ inline boost::optional<std::string> deduce_boundary(
   boost::optional<std::string> result;
 
   static std::regex r1{
-      R"regex(^multipart/x-mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
-      std::regex_constants::icase};
-  static std::regex r2{
-      R"regex(^multipart/x-mixed-replace\s*;\s*boundary=([^"]+)$)regex",
-      std::regex_constants::icase};
-  static std::regex r3{
       R"regex(^multipart/mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
       std::regex_constants::icase};
-  static std::regex r4{
+  static std::regex r2{
       R"regex(^multipart/mixed-replace\s*;\s*boundary=([^"]+)$)regex",
       std::regex_constants::icase};
+  static std::regex r3{
+      R"regex(^multipart/mixed\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r4{R"regex(^multipart/mixed\s*;\s*boundary=([^"]+)$)regex",
+                       std::regex_constants::icase};
   static std::regex r5{
-      R"regex(^multipart/form-data\s*;\s*boundary="([^"]+)"$)regex",
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary="([^"]+)"$)regex",
       std::regex_constants::icase};
   static std::regex r6{
+      R"regex(^multipart/x-mixed-replace\s*;\s*boundary=([^"]+)$)regex",
+      std::regex_constants::icase};
+  static std::regex r7{
+      R"regex(^multipart/form-data\s*;\s*boundary="([^"]+)"$)regex",
+      std::regex_constants::icase};
+  static std::regex r8{
       R"regex(^multipart/form-data\s*;\s*boundary=([^"]+)$)regex",
       std::regex_constants::icase};
 
@@ -543,7 +610,9 @@ inline boost::optional<std::string> deduce_boundary(
       std::regex_match(content_type.begin(), content_type.end(), match, r3) ||
       std::regex_match(content_type.begin(), content_type.end(), match, r4) ||
       std::regex_match(content_type.begin(), content_type.end(), match, r5) ||
-      std::regex_match(content_type.begin(), content_type.end(), match, r6)) {
+      std::regex_match(content_type.begin(), content_type.end(), match, r6) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r7) ||
+      std::regex_match(content_type.begin(), content_type.end(), match, r8)) {
     result = match[1].str();
   }
 
@@ -576,42 +645,158 @@ bool find_multipart_boundary(S& stream, B& buffer, const std::string& boundary)
   }
 }
 
+template <typename S, typename Buf, typename BR, typename P>
+void handle_client_auth(S& stream, http_url_scheme& scheme, Buf& buffer,
+                        BR& beast_request, P& empty_parser)
+{
+  http::response_parser<http::string_body> resp_parser_unauth{
+      std::move(empty_parser)};
+
+  asyik::internal::http::async_read(stream, buffer, resp_parser_unauth).get();
+
+  digest_authenticator auth(
+      resp_parser_unauth.get()[http::field::www_authenticate],
+      scheme.username(), scheme.password(), scheme.target(),
+      beast_request.method_string(), resp_parser_unauth.get().body());
+
+  auth.generateAuthorization();
+  throw auth;
+}
+
+template <typename S, typename R, typename F>
+boost::fibers::future<size_t> handle_client_request_response(
+    S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f)
+{
+  auto w = internal::http::async_write(stream, req->beast_request);
+
+  http::response_parser<http::empty_body> empty_parser;
+  empty_parser.eager(false);
+  empty_parser.header_limit(default_response_header_limit);
+  empty_parser.body_limit(default_response_body_limit);
+
+  asyik::internal::http::async_read_header(stream, req->buffer, empty_parser)
+      .get();
+
+  if ((empty_parser.get().result() ==
+       boost::beast::http::status::unauthorized) &&
+      scheme.username().length() && scheme.password().length()) {
+    w.get();
+    handle_client_auth(stream, scheme, req->buffer, req->beast_request,
+                       empty_parser);
+  }
+
+  if (empty_parser.get().count("content-type") &&
+      (empty_parser.get().at("content-type").contains("multipart"))) {
+    // Multipart handling
+
+    auto boundary =
+        deduce_boundary(empty_parser.get()[http::field::content_type]);
+
+    if (!boundary)
+      throw asyik::unexpected_error(
+          "HTTP response error, cannot get boundary token");
+
+    http::response_parser<http::string_body> resp_parser{
+        std::move(empty_parser)};
+    req->response.beast_response = resp_parser.release();
+
+    while (find_multipart_boundary(stream, req->buffer,
+                                   boundary.get_value_or(""))) {
+      beast::get_lowest_layer(stream).expires_after(
+          std::chrono::milliseconds(timeout_ms));
+
+      http::response_parser<http::empty_body> empty_mpart_parser;
+      empty_mpart_parser.eager(false);
+      empty_mpart_parser.header_limit(default_response_header_limit);
+      empty_mpart_parser.body_limit(default_response_body_limit);
+
+      std::string status =
+          "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
+      status += " " + std::string(resp_parser.get().reason()) + "\r\n";
+
+      boost::beast::error_code ec;
+      empty_mpart_parser.put(asio::buffer(status), ec);
+
+      asyik::internal::http::async_read_header(stream, req->buffer,
+                                               empty_mpart_parser)
+          .get();
+
+      if (!empty_mpart_parser.content_length())
+        throw asyik::unexpected_error(
+            "HTTP multipart without part content-length is not "
+            "supported!");
+
+      http::response_parser<http::string_body> resp_mpart_parser{
+          std::move(empty_mpart_parser)};
+      asyik::internal::http::async_read(stream, req->buffer, resp_mpart_parser)
+          .get();
+
+      // proses resp_mpart_parser;
+      req->multipart_response.beast_response = resp_mpart_parser.release();
+
+      f(req);
+    }
+  } else {
+    // non-multipart handling
+    http::response_parser<http::string_body> resp_parser{
+        std::move(empty_parser)};
+
+    asyik::internal::http::async_read(stream, req->buffer, resp_parser).get();
+
+    req->response.beast_response = resp_parser.release();
+  }
+  return w;
+}
+
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
     service_ptr as, int timeout_ms, string_view method, string_view url,
-    D&& data, const std::map<string_view, string_view>& headers, F&& f)
+    D&& data, const std::map<string_view, string_view>& headers, F&& f,
+    const digest_authenticator* auth = nullptr)
 {
   http_url_scheme scheme;
 
-  BOOST_ASSERT(timeout_ms >= 0);
+  BOOST_ASSERT(timeout_ms > 0);
 
   if (http_analyze_url(url, scheme)) {
     auto req = std::make_shared<http_request>();
 
-    if (scheme.port == 80 || scheme.port == 443)
-      req->headers.set("Host", scheme.host);
+    if (scheme.port() == 80 || scheme.port() == 443)
+      req->headers.set("Host", scheme.host());
     else
-      req->headers.set("Host", scheme.host + ":" + std::to_string(scheme.port));
+      req->headers.set("Host", std::string(scheme.host()) + ":" +
+                                   std::to_string(scheme.port()));
     req->headers.set("User-Agent", LIBASYIK_VERSION_STRING);
-    req->headers.set("Content-Type", "text/html");
+    req->headers.set("Accept", "*/*");
+
+    if (auth) {
+      req->headers.set("Accept-Encoding", "identity");
+      req->headers.set("Authorization", auth->authorization());
+    }
 
     // user-overidden headers
     for (const auto& item : headers) req->headers.set(item.first, item.second);
 
     req->body = std::forward<D>(data);
+    if (req->body.length()) {
+      if (!req->headers.count(http::field::content_type))
+        req->headers.set("Content-Type", "text/html");
+    }
+    req->beast_request.version(11);
     req->method(method);
-    req->target(scheme.target);
-    req->beast_request.keep_alive(false);
+    req->target(scheme.target().length() ? scheme.target() : "/");
+    req->beast_request.keep_alive(true);
+    req->headers.set("Connection", "Keep-Alive");
 
     req->beast_request.prepare_payload();
 
     tcp::resolver resolver(as->get_io_service().get_executor());
     tcp::resolver::results_type results =
-        internal::socket::async_resolve(resolver, scheme.host,
-                                        std::to_string(scheme.port))
+        internal::socket::async_resolve(resolver, std::string(scheme.host()),
+                                        std::to_string(scheme.port()))
             .get();
 
-    if (scheme.is_ssl) {
+    if (scheme.is_ssl()) {
       // The SSL context is required, and holds certificates
       ssl::context ctx(ssl::context::tlsv12_client);
 
@@ -622,89 +807,27 @@ http_request_ptr http_easy_request_multipart(
       ctx.set_verify_mode(ssl::verify_none);  //!!!
 
       beast::ssl_stream<beast::tcp_stream> stream(
-          as->get_io_service().get_executor(), ctx);
+          asio::make_strand(as->get_io_service()), ctx);
 
-      if (timeout_ms)
-        stream.next_layer().expires_after(
-            std::chrono::milliseconds(timeout_ms));
-      else
-        stream.next_layer().expires_never();
+      stream.next_layer().expires_after(std::chrono::milliseconds(timeout_ms));
 
       internal::socket::async_connect(beast::get_lowest_layer(stream), results)
           .get();
       internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
-      auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::empty_body> empty_parser;
-      empty_parser.eager(false);
-      empty_parser.header_limit(default_response_header_limit);
-      empty_parser.body_limit(default_response_body_limit);
-      asyik::internal::http::async_read_header(stream, req->buffer,
-                                               empty_parser)
-          .get();
-
-      if (empty_parser.get().count("content-type") &&
-          (empty_parser.get().at("content-type").contains("multipart"))) {
-        // multipart handling
-
-        auto boundary =
-            deduce_boundary(empty_parser.get()[http::field::content_type]);
-
-        if (!boundary)
-          throw asyik::unexpected_error(
-              "HTTP response error, cannot get boundary token");
-
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-        req->response.beast_response = resp_parser.release();
-
-        while (find_multipart_boundary(stream, req->buffer,
-                                       boundary.get_value_or(""))) {
-          http::response_parser<http::empty_body> empty_mpart_parser;
-          empty_mpart_parser.eager(false);
-          empty_mpart_parser.header_limit(default_response_header_limit);
-          empty_mpart_parser.body_limit(default_response_body_limit);
-
-          std::string status =
-              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
-          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
-
-          boost::beast::error_code ec;
-          empty_mpart_parser.put(asio::buffer(status), ec);
-
-          asyik::internal::http::async_read_header(stream, req->buffer,
-                                                   empty_mpart_parser)
-              .get();
-
-          if (!empty_mpart_parser.content_length())
-            throw asyik::unexpected_error(
-                "HTTP multipart without part content-length is not "
-                "supported!");
-
-          http::response_parser<http::string_body> resp_mpart_parser{
-              std::move(empty_mpart_parser)};
-          asyik::internal::http::async_read(stream, req->buffer,
-                                            resp_mpart_parser)
-              .get();
-
-          // proses resp_mpart_parser;
-          req->multipart_response.beast_response = resp_mpart_parser.release();
-
-          f(req);
-        }
-      } else {
-        // non-multipart handling
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-
-        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
-            .get();
-
-        req->response.beast_response = resp_parser.release();
-      }
-
+      boost::fibers::future<size_t> is_write_done;
       try {
-        w.get();
+        is_write_done =
+            handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      } catch (digest_authenticator& auth) {
+        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
+
+        req = http_easy_request_multipart(as, timeout_ms, method, url,
+                                          std::forward<D>(data), headers,
+                                          std::forward<F>(f), &auth);
+      }
+      try {
+        is_write_done.get();
         internal::ssl::async_shutdown(stream).get();
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
@@ -714,88 +837,27 @@ http_request_ptr http_easy_request_multipart(
 
       return req;
     } else {
-      beast::tcp_stream stream(as->get_io_service().get_executor());
+      beast::tcp_stream stream(asio::make_strand(as->get_io_service()));
 
-      if (timeout_ms)
-        stream.expires_after(std::chrono::milliseconds(timeout_ms));
-      else
-        stream.expires_never();
+      stream.expires_after(std::chrono::milliseconds(timeout_ms));
 
       internal::socket::async_connect(stream, results).get();
-      auto w = internal::http::async_write(stream, req->beast_request);
 
-      http::response_parser<http::empty_body> empty_parser;
-      empty_parser.eager(false);
-      empty_parser.header_limit(default_response_header_limit);
-      empty_parser.body_limit(default_response_body_limit);
+      boost::fibers::future<size_t> is_write_done;
+      try {
+        is_write_done =
+            handle_client_request_response(stream, timeout_ms, req, scheme, f);
+      } catch (digest_authenticator& auth) {
+        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
 
-      asyik::internal::http::async_read_header(stream, req->buffer,
-                                               empty_parser)
-          .get();
-
-      if (empty_parser.get().count("content-type") &&
-          (empty_parser.get().at("content-type").contains("multipart"))) {
-        // Multipart handling
-
-        auto boundary =
-            deduce_boundary(empty_parser.get()[http::field::content_type]);
-
-        if (!boundary)
-          throw asyik::unexpected_error(
-              "HTTP response error, cannot get boundary token");
-
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-        req->response.beast_response = resp_parser.release();
-
-        while (find_multipart_boundary(stream, req->buffer,
-                                       boundary.get_value_or(""))) {
-          http::response_parser<http::empty_body> empty_mpart_parser;
-          empty_mpart_parser.eager(false);
-          empty_mpart_parser.header_limit(default_response_header_limit);
-          empty_mpart_parser.body_limit(default_response_body_limit);
-
-          std::string status =
-              "HTTP/1.1 " + std::to_string((int)resp_parser.get().result());
-          status += " " + std::string(resp_parser.get().reason()) + "\r\n";
-
-          boost::beast::error_code ec;
-          empty_mpart_parser.put(asio::buffer(status), ec);
-
-          asyik::internal::http::async_read_header(stream, req->buffer,
-                                                   empty_mpart_parser)
-              .get();
-
-          if (!empty_mpart_parser.content_length())
-            throw asyik::unexpected_error(
-                "HTTP multipart without part content-length is not "
-                "supported!");
-
-          http::response_parser<http::string_body> resp_mpart_parser{
-              std::move(empty_mpart_parser)};
-          asyik::internal::http::async_read(stream, req->buffer,
-                                            resp_mpart_parser)
-              .get();
-
-          // proses resp_mpart_parser;
-          req->multipart_response.beast_response = resp_mpart_parser.release();
-
-          f(req);
-        }
-      } else {
-        // non-multipart handling
-        http::response_parser<http::string_body> resp_parser{
-            std::move(empty_parser)};
-
-        asyik::internal::http::async_read(stream, req->buffer, resp_parser)
-            .get();
-
-        req->response.beast_response = resp_parser.release();
+        req = http_easy_request_multipart(as, timeout_ms, method, url,
+                                          std::forward<D>(data), headers,
+                                          std::forward<F>(f), &auth);
       }
 
       beast::error_code ec;
       try {
-        w.get();
+        is_write_done.get();
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
       } catch (...) {
         // it's okay, we need both parties to close SSL gracefully,
@@ -894,9 +956,13 @@ void http_connection<StreamType>::start()
                         body_limit = server->get_request_body_limit(),
                         header_limit =
                             server->get_request_header_limit()](void) {
+        // flag to ignore eos error since work has been
+        // done anyway
+        bool safe_to_close = false;
+
         try {
           ip::tcp::no_delay option(true);
-          beast::get_lowest_layer(p->get_stream()).set_option(option);
+          beast::get_lowest_layer(p->get_stream()).socket().set_option(option);
 
           p->handshake_if_ssl();
 
@@ -912,6 +978,7 @@ void http_connection<StreamType>::start()
             asyik::internal::http::async_read_header(
                 p->get_stream(), asyik_req->buffer, empty_parser)
                 .get();
+            safe_to_close = false;
 
             http::request_parser<http::string_body> req_parser{
                 std::move(empty_parser)};
@@ -951,7 +1018,6 @@ void http_connection<StreamType>::start()
                     websocket_impl<beast::websocket::stream<StreamType>>>(
                     typename websocket_impl<
                         beast::websocket::stream<StreamType>>::private_{},
-                    service->get_io_service().get_executor(),
                     std::make_shared<beast::websocket::stream<StreamType>>(
                         std::move(p->get_stream())),
                     asyik_req);
@@ -1005,13 +1071,18 @@ void http_connection<StreamType>::start()
                 asyik_req->response.beast_response.keep_alive(false);
               };
 
-              if (asyik_req->manual_response) break;
+              if (asyik_req->manual_response) {
+                safe_to_close = true;
+                break;
+              }
 
               asyik_req->response.beast_response.prepare_payload();
               http::serializer<false, http::string_body> sr{res};
               asyik::internal::http::async_write(p->get_stream(), res).get();
 
               if (!req.need_eof()) break;
+
+              safe_to_close = true;
             }
           }
           p->shutdown_ssl();
@@ -1029,6 +1100,12 @@ void http_connection<StreamType>::start()
               .get();
 
           p->shutdown_ssl();
+        } catch (asyik::already_closed_error& e) {
+          if (!safe_to_close) {
+            LOG(WARNING) << "End of stream exception is catched during client "
+                            "connection, reason: "
+                         << e.what() << "\n";
+          }
         } catch (std::exception& e) {
           LOG(WARNING)
               << "exception is catched during client connection, reason: "
@@ -1055,17 +1132,15 @@ http_server<StreamType>::http_server(struct private_&&, service_ptr as,
 template <typename StreamType>
 void http_server<StreamType>::start_accept(asio::io_context& io_service)
 {
-  auto new_connection = std::make_shared<http_connection<StreamType>>(
-      typename http_connection<StreamType>::private_{},
-      io_service.get_executor(), this->shared_from_this());
-
   acceptor->async_accept(
-      beast::get_lowest_layer(new_connection->get_stream()),
-      [new_connection,
-       p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
-          const boost::system::error_code& error) {
+      asio::make_strand(io_service),
+      [p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
+          const boost::system::error_code& error, tcp::socket socket) {
         if (!p.expired() && !error) {
           auto ps = p.lock();
+          auto new_connection = std::make_shared<http_connection<StreamType>>(
+              typename http_connection<StreamType>::private_{},
+              std::move(socket), ps);
           new_connection->start();
           if (!ps->service.expired()) {
             auto service = ps->service.lock();

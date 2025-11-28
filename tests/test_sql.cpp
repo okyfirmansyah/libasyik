@@ -1,3 +1,5 @@
+#include <thread>
+
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
 #include "libasyik/service.hpp"
@@ -175,5 +177,123 @@ TEST_CASE("Test transactions")
     as->stop();
   });
   as->run();
+}
+
+TEST_CASE("Test LISTEN/NOTIFY")
+{
+  using namespace soci;
+  auto as = asyik::make_service();
+
+  auto pool = make_sql_pool(
+      asyik::sql_backend_postgresql,
+      "host=localhost dbname=postgres password=test user=postgres", 2);
+
+  // session that will listen
+  auto ses = pool->get_session(as);
+
+  fibers::mutex mtx;
+  fibers::condition_variable cv;
+  int received = 0;
+  std::string got_payload;
+
+  ses->listen("test_channel",
+              [&](const std::string& ch, const std::string& payload) {
+                std::lock_guard<fibers::mutex> l(mtx);
+                got_payload = payload;
+                ++received;
+                cv.notify_one();
+              });
+
+  // send a notification from another session
+  as->execute([as, pool]() {
+    auto s2 = pool->get_session(as);
+    try {
+      s2->query("NOTIFY test_channel, 'hello_from_test';");
+    } catch (...) {
+    }
+  });
+
+  // wait for the notification (with timeout) and stop the service
+  as->execute([&] {
+    std::unique_lock<fibers::mutex> lk(mtx);
+    if (received == 0) cv.wait_for(lk, std::chrono::seconds(5));
+    as->stop();
+  });
+
+  as->run();
+
+  REQUIRE(received >= 1);
+  REQUIRE(got_payload == "hello_from_test");
+}
+
+TEST_CASE("Test LISTEN/NOTIFY multiple threads and channels")
+{
+  using namespace soci;
+  auto as = asyik::make_service();
+
+  auto pool = make_sql_pool(
+      asyik::sql_backend_postgresql,
+      "host=localhost dbname=postgres password=test user=postgres", 4);
+
+  // single session that listens on multiple channels
+  auto listener = pool->get_session(as);
+
+  std::vector<std::string> channels = {"chan_a", "chan_b", "chan_c"};
+
+  fibers::mutex mtx;
+  fibers::condition_variable cv;
+  std::atomic<int> received(0);
+  std::unordered_map<std::string, int> per_channel_count;
+
+  for (auto& ch : channels) {
+    per_channel_count[ch] = 0;
+    listener->listen(
+        ch, [&mtx, &cv, &received, &per_channel_count, ch](
+                const std::string& channel, const std::string& payload) {
+          std::lock_guard<fibers::mutex> l(mtx);
+          (void)payload;
+          ++received;
+          ++per_channel_count[channel];
+          cv.notify_one();
+        });
+  }
+
+  const int num_threads = 5;
+  const int sends_per_thread = 20;
+  const int expected = num_threads * sends_per_thread;
+
+  // spawn sender threads that perform NOTIFY on various channels
+  std::vector<std::thread> senders;
+  for (int t = 0; t < num_threads; ++t) {
+    senders.emplace_back([t, sends_per_thread, &channels, pool, as]() {
+      for (int i = 0; i < sends_per_thread; ++i) {
+        auto s = pool->get_session(as);
+        std::string ch = channels[(t + i) % channels.size()];
+        std::string payload = "t" + std::to_string(t) + "_" + std::to_string(i);
+        try {
+          s->query(std::string("NOTIFY ") + ch + ", '" + payload + "';");
+        } catch (...) {
+        }
+      }
+    });
+  }
+
+  // wait inside the service context for all notifications or timeout
+  as->execute([&] {
+    std::unique_lock<fibers::mutex> lk(mtx);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (received.load() < expected) {
+      cv.wait_until(lk, deadline);
+    }
+    as->stop();
+  });
+
+  as->run();
+
+  for (auto& th : senders) th.join();
+
+  REQUIRE(received.load() == expected);
+  // ensure all channels received something
+  for (auto& ch : channels) REQUIRE(per_channel_count[ch] > 0);
 }
 }  // namespace asyik

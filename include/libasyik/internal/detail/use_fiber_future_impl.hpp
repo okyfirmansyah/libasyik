@@ -309,14 +309,45 @@ class fiber_promise_handler_0 : public fiber_promise_creator<void> {
   void operator()() { this->p_->set_value(); }
 };
 
+template <typename P>
+void asyik_set_error(const boost::system::error_code& ec, P& p_)
+{
+  if ((ec == asio::error::timed_out) ||
+      (ec == asio::error::operation_aborted) || (ec == beast::error::timeout))
+    p_->set_exception(std::make_exception_ptr(
+        asyik::network_timeout_error(ec,
+                                     "[asyik::network_timeout_error]timeout "
+                                     "error during http::async_read")));
+  else if (ec == beast::http::error::header_limit) {
+    p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
+        ec,
+        "[asyik::overflow_error]incoming request header size is too large")));
+  } else if ((ec == beast::http::error::body_limit) ||
+             (ec == beast::websocket::error::buffer_overflow) ||
+             (ec == beast::websocket::error::message_too_big)) {
+    p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
+        ec, "[asyik::overflow_error]incoming request body size is too large")));
+  } else if ((ec == beast::http::error::end_of_stream) ||
+             (ec == asio::ssl::error::stream_truncated) ||
+             (ec == asio::error::connection_reset) ||
+             (ec == beast::websocket::error::closed) ||
+             (ec == asio::error::eof)) {
+    p_->set_exception(std::make_exception_ptr(
+        asyik::already_closed_error(ec,
+                                    "[asyik::already_closed_error]end of "
+                                    "stream or network connection closed")));
+  } else
+    p_->set_exception(
+        std::make_exception_ptr(boost::system::system_error(ec, ec.message())));
+}
+
 // For completion signature void(error_code).
 class fiber_promise_handler_ec_0 : public fiber_promise_creator<void> {
  public:
   void operator()(const boost::system::error_code& ec)
   {
     if (ec) {
-      this->p_->set_exception(
-          std::make_exception_ptr(boost::system::system_error(ec)));
+      asyik_set_error(ec, this->p_);
     } else {
       this->p_->set_value();
     }
@@ -355,29 +386,10 @@ class fiber_promise_handler_ec_1 : public fiber_promise_creator<T> {
   void operator()(const boost::system::error_code& ec,
                   BOOST_ASIO_MOVE_ARG(Arg) arg)
   {
-    // if (ec) {
-    //   this->p_->set_exception(
-    //       std::make_exception_ptr(boost::system::system_error(ec)));
-    // } else
-    //   this->p_->set_value(BOOST_ASIO_MOVE_CAST(Arg)(arg));
-
-    if (!ec)
+    if (ec)
+      asyik_set_error(ec, this->p_);
+    else
       this->p_->set_value(BOOST_ASIO_MOVE_CAST(Arg)(arg));
-    else if ((ec == asio::error::timed_out) ||
-             (ec == asio::error::operation_aborted) ||
-             (ec == beast::error::timeout))
-      this->p_->set_exception(
-          std::make_exception_ptr(asyik::network_timeout_error(
-              ec, "timeout error during http::async_read")));
-    else if (ec == beast::http::error::header_limit) {
-      this->p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
-          ec, "incoming request header size is too large")));
-    } else if (ec == beast::http::error::body_limit) {
-      this->p_->set_exception(std::make_exception_ptr(asyik::overflow_error(
-          ec, "incoming request body size is too large")));
-    } else
-      this->p_->set_exception(
-          std::make_exception_ptr(asyik::network_error(ec, ec.message())));
   }
 };
 
@@ -435,8 +447,7 @@ class fiber_promise_handler_ec_n : public fiber_promise_creator<T> {
                   BOOST_ASIO_MOVE_ARG(Args)... args)
   {
     if (ec) {
-      this->p_->set_exception(
-          std::make_exception_ptr(boost::system::system_error(ec)));
+      asyik_set_error(ec, this->p_);
     } else {
       this->p_->set_value(
           std::forward_as_tuple(BOOST_ASIO_MOVE_CAST(Args)(args)...));
@@ -445,19 +456,18 @@ class fiber_promise_handler_ec_n : public fiber_promise_creator<T> {
 
 #else  // defined(BOOST_ASIO_HAS_VARIADIC_TEMPLATES)
 
-#define BOOST_ASIO_PRIVATE_CALL_OP_DEF(n)                            \
-  template <BOOST_ASIO_VARIADIC_TPARAMS(n)>                          \
-  void operator()(const boost::system::error_code& ec,               \
-                  BOOST_ASIO_VARIADIC_MOVE_PARAMS(n))                \
-  {                                                                  \
-    if (ec) {                                                        \
-      this->p_->set_exception(                                       \
-          std::make_exception_ptr(boost::system::system_error(ec))); \
-    } else {                                                         \
-      this->p_->set_value(                                           \
-          std::forward_as_tuple(BOOST_ASIO_VARIADIC_MOVE_ARGS(n)));  \
-    }                                                                \
-  }                                                                  \
+#define BOOST_ASIO_PRIVATE_CALL_OP_DEF(n)                           \
+  template <BOOST_ASIO_VARIADIC_TPARAMS(n)>                         \
+  void operator()(const boost::system::error_code& ec,              \
+                  BOOST_ASIO_VARIADIC_MOVE_PARAMS(n))               \
+  {                                                                 \
+    if (ec) {                                                       \
+      asyik_set_error(ec, this->p_);                                \
+    } else {                                                        \
+      this->p_->set_value(                                          \
+          std::forward_as_tuple(BOOST_ASIO_VARIADIC_MOVE_ARGS(n))); \
+    }                                                               \
+  }                                                                 \
   /**/
   BOOST_ASIO_VARIADIC_GENERATE(BOOST_ASIO_PRIVATE_CALL_OP_DEF)
 #undef BOOST_ASIO_PRIVATE_CALL_OP_DEF

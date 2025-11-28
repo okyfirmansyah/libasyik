@@ -1,6 +1,7 @@
 #include "libasyik/service.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <regex>
 
@@ -19,28 +20,24 @@ std::chrono::time_point<std::chrono::high_resolution_clock>
 std::shared_ptr<fibers::buffered_channel<std::function<void()>>> service::tasks;
 std::shared_ptr<AixLog::Sink> service::default_log_sink;
 
-service::service(struct service::private_&&, int thread_num)
+service::service(struct service::private_&&)
     : stopped(false),
       io_service(),
       strand(io_service),
       execute_tasks(
           std::make_shared<fibers::buffered_channel<std::function<void()>>>(
-              1024)),
-      io_service_thread_num(thread_num)
+              1024))
 {
-  BOOST_ASSERT_MSG(
-      io_service_thread_num >= 0,
-      "service's thread number should be greater or equal than 0!");
-
   if (!default_log_sink)
     default_log_sink =
         AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::info);
   fibers::use_scheduling_algorithm<fibers::algo::round_robin>();
+  execute_task_count = 0;
 }
 
-service_ptr make_service(int thread_num)
+service_ptr make_service()
 {
-  return std::make_shared<service>(service::private_{}, thread_num);
+  return std::make_shared<service>(service::private_{});
 }
 
 std::atomic<uint32_t> service::async_task_started;
@@ -61,7 +58,7 @@ async_stats service::get_async_stats()
 }
 
 thread_local service_wptr service::active_service;
-void service::run()
+void service::run(bool stop_on_complete)
 {
   BOOST_ASSERT_MSG(!stopped,
                    "Re-run already stopped service is not supported, please "
@@ -78,51 +75,26 @@ void service::run()
   });
 
   std::shared_ptr<boost::asio::io_service::work> work;
-  std::vector<std::thread> t;
 
-  if (!io_service_thread_num) {
-    // in-thread io_service loop
-    int idle_threshold = 30000;
-    while (!stopped) {
-      if (!io_service.poll()) {
-        if (idle_threshold) {
-          idle_threshold--;
-          asyik::sleep_for(std::chrono::microseconds(10));
-        } else {
-          asyik::sleep_for(std::chrono::microseconds(1000));
-        }
-      } else
-        idle_threshold = 30000;
-      if (!stopped) io_service.restart();
-    }
-  } else {
-    // separate thread io_service loop
-    work = std::make_shared<boost::asio::io_service::work>(io_service);
-    sched_param sch_params;
-    for (int i = 0; i < io_service_thread_num; i++) {
-      t.emplace_back([i = &io_service, s = &stopped, &sch_params]() {
-        while (*s == false) {
-          i->run();
-        }
-      });
-      sch_params.sched_priority = 2;
-      pthread_setschedparam(t.back().native_handle(), SCHED_FIFO, &sch_params);
-    }
-
-    // wait/yield until stop is signaled
-    std::unique_lock<fibers::mutex> l(terminate_req_mtx);
-    while (!stopped) terminate_req_cond.wait(l);
-    l.unlock();
-
-    io_service.stop();
-
-    for (int i = 0; i < io_service_thread_num; i++) t.at(i).join();
-    std::move(io_service);
+  // in-thread io_service loop
+  int idle_threshold = 30000;
+  while (!stopped && (!stop_on_complete || execute_task_count > 0)) {
+    if (!io_service.poll()) {
+      if (idle_threshold) {
+        idle_threshold--;
+        asyik::sleep_for(std::chrono::microseconds(10));
+      } else {
+        asyik::sleep_for(std::chrono::microseconds(1000));
+      }
+    } else
+      idle_threshold = 30000;
+    if (!stopped && (!stop_on_complete || execute_task_count > 0))
+      io_service.restart();
   }
 
   execute_tasks->close();
   for (int i = 0; i < 10000; i++) {
-    if (!io_service_thread_num) io_service.poll();  // build-in thread only
+    io_service.poll();  // build-in thread only
     asyik::sleep_for(std::chrono::microseconds(10));
   }
 
@@ -132,7 +104,17 @@ void service::run()
 
 void service::init_workers()
 {
-  int pool_size = std::thread::hardware_concurrency() * 2;
+  // Get thread multiplier from environment variable, default to 5
+  int multiplier = 5;
+  const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
+  if (env_multiplier != nullptr) {
+    multiplier = std::atoi(env_multiplier);
+    if (multiplier <= 0) {
+      multiplier = 5;  // fallback to default if invalid value
+    }
+  }
+
+  int pool_size = std::thread::hardware_concurrency() * multiplier;
   std::atomic_store(
       &tasks,
       std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));

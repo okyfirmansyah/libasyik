@@ -14,6 +14,7 @@ target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_
                                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
+target_include_directories(${PROJECT_NAME} PRIVATE external/cppcodec)
 target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
@@ -31,6 +32,11 @@ install(
 
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/external/aixlog/include/
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
+)
+
+install(
+    DIRECTORY ${PROJECT_SOURCE_DIR}/external/cppcodec/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
 )
 

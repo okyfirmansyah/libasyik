@@ -63,6 +63,7 @@ class service : public std::enable_shared_from_this<service> {
   static std::atomic<uint32_t> async_task_error;
   static std::atomic<uint32_t> async_queue_size;
   static thread_local service_wptr active_service;
+  std::atomic<uint32_t> execute_task_count;
 
  public:
   ~service(){};
@@ -72,7 +73,7 @@ class service : public std::enable_shared_from_this<service> {
   service(service&&) = default;
   service& operator=(service&&) = default;
 
-  service(struct private_&&, int thread_num);
+  service(struct private_&&);
 
   static async_stats get_async_stats();
 
@@ -84,7 +85,8 @@ class service : public std::enable_shared_from_this<service> {
         fibers::promise<typename std::result_of<F(Args...)>::type>>();
     auto future = p->get_future();
     auto t = std::atomic_load(&execute_tasks);
-    t->push([f = std::forward<F>(fun), &args..., p]() mutable {
+    execute_task_count++;
+    t->push([f = std::forward<F>(fun), &args..., p, this]() mutable {
       try {
         service_internal::helper<
             typename std::result_of<F(Args...)>::type>::set(p, f,
@@ -93,6 +95,7 @@ class service : public std::enable_shared_from_this<service> {
       } catch (...) {
         p->set_exception(std::current_exception());
       };
+      execute_task_count--;
     });
 
     return future;
@@ -134,16 +137,12 @@ class service : public std::enable_shared_from_this<service> {
     return future;
   };
 
-  void run();
+  void run(bool stop_on_complete = false);
   void stop()
   {
-    execute([s = &stopped, cv = &terminate_req_cond, i = &io_service,
-             n = io_service_thread_num]() {
+    execute([s = &stopped, cv = &terminate_req_cond, i = &io_service]() {
       *s = true;
-      if (!n)
-        std::move(i);
-      else
-        cv->notify_one();
+      std::move(i);
     });
   };
   bool is_stopped() { return stopped; }
@@ -173,13 +172,12 @@ class service : public std::enable_shared_from_this<service> {
 
   static std::shared_ptr<fibers::buffered_channel<std::function<void()>>> tasks;
   static std::shared_ptr<AixLog::Sink> default_log_sink;
-  int io_service_thread_num;
 
   boost::fibers::condition_variable terminate_req_cond;
   boost::fibers::mutex terminate_req_mtx;
 
  public:
-  friend service_ptr make_service(int thread_num);
+  friend service_ptr make_service();
 };
 
 inline static service_ptr get_current_service()
@@ -187,7 +185,7 @@ inline static service_ptr get_current_service()
   return service::get_current_service();
 }
 
-service_ptr make_service(int thread_num = 0);
+service_ptr make_service();
 
 }  // namespace asyik
 

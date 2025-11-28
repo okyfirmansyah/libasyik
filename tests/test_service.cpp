@@ -129,7 +129,7 @@ TEST_CASE("Check return value from execute()", "[service]")
 
 TEST_CASE("Check return value from async()", "[service]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
   as->execute([&]() {
     std::string sequence =
         as->async([]() -> std::string { return "hehehe"; }).get();
@@ -152,7 +152,7 @@ TEST_CASE("Check return value from async()", "[service]")
 
 TEST_CASE("Test return value execute from async", "[service]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
 
   as->async([as]() {
     REQUIRE(as == asyik::get_current_service());
@@ -168,7 +168,7 @@ TEST_CASE("Test return value execute from async", "[service]")
 
 TEST_CASE("execute async", "[service]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
   std::atomic<int> i(0);
 
   as->async(
@@ -318,7 +318,7 @@ TEST_CASE("testing complex async and execute interaction", "[service]")
 
 TEST_CASE("testing highly parallel, fiber-i/o blocking async()", "[service]")
 {
-  auto as = asyik::make_service(4);
+  auto as = asyik::make_service();
   int count = 0;
 
   for (int i = 0; i < 1000; i++) {
@@ -336,5 +336,25 @@ TEST_CASE("testing highly parallel, fiber-i/o blocking async()", "[service]")
   });
 
   as->run();
+}
+
+TEST_CASE(
+    "testing highly parallel, fiber-i/o blocking async() with auto stopping "
+    "run()",
+    "[service]")
+{
+  auto as = asyik::make_service();
+  int count = 0;
+
+  for (int i = 0; i < 1000; i++) {
+    as->async([&count, as]() {
+      asyik::sleep_for(std::chrono::milliseconds(rand() % 150));
+      as->execute([&count, as]() { count++; });
+    });
+  }
+
+  LOG(INFO) << "waiting all execute() to be finished..\n";
+
+  as->run(true);
 }
 }  // namespace asyik

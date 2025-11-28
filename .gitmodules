@@ -4,3 +4,7 @@
 [submodule "external/Catch2"]
 	path = external/Catch2
 	url = https://github.com/catchorg/Catch2.git
+[submodule "external/cppcodec"]
+	path = external/cppcodec
+	url = https://github.com/tplgy/cppcodec
+	branch = v0.2

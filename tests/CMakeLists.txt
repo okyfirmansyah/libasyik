@@ -18,6 +18,6 @@ if(LIBASYIK_ENABLE_SOCI)
     target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
 endif()
 
-
+target_include_directories(${PROJECT_NAME} PRIVATE ../external/cppcodec/)
 target_include_directories(${PROJECT_NAME} PRIVATE ../external/aixlog/include)
 target_link_libraries(${PROJECT_NAME} libasyik Catch2::Catch2)
