@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
 SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
+SET(LIBASYIK_ENABLE_SSL_SERVER ON CACHE BOOL "Libasyik Enable SSL/HTTPS Server Support")
+
+if(LIBASYIK_ENABLE_SSL_SERVER)
+    add_definitions("-DLIBASYIK_ENABLE_SSL_SERVER=${LIBASYIK_ENABLE_SSL_SERVER}")
+endif()
 
 add_subdirectory(external/Catch2)
 add_subdirectory(src)

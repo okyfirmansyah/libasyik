@@ -564,6 +564,7 @@ TEST_CASE("Test http client timeout", "[http]")
   as->run();
 }
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
 TEST_CASE("Create https server and client, do some https communications",
           "[https]")
 {
@@ -708,20 +709,23 @@ TEST_CASE("Create https server and client, do some https communications",
 
   as->run();
 }
+#endif  // LIBASYIK_ENABLE_SSL_SERVER
 
 TEST_CASE("test manual handling of http requests", "[http]")
 {
   auto as = asyik::make_service();
 
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
   // The SSL context is required, and holds certificates
   ssl::context ctx{ssl::context::tlsv12};
 
   // This holds the self-signed certificate used by the server
   load_server_certificate(ctx);
 
-  auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
   auto server2 =
       asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4008);
+#endif
 
   server->on_http_request(
       "/manual", "GET",
@@ -748,6 +752,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
             .get();
       });
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
   server2->on_http_request(
       "/manual", "GET",
       [server2](http_request_ptr req, const http_route_args& args) {
@@ -774,9 +779,15 @@ TEST_CASE("test manual handling of http requests", "[http]")
                               use_fiber_future)
             .get();
       });
+#endif
 
   asyik::sleep_for(std::chrono::milliseconds(100));
-  as->execute([as, server, server2]() {
+  as->execute([as, server
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
+               ,
+               server2
+#endif
+  ]() {
     {
       auto req = asyik::http_easy_request(
           as, "GET", "http://127.0.0.1:4004/manual", "", {{"x-test", "ok"}});
@@ -789,6 +800,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
     }
 
     LOG(INFO) << "performing client requests from inside async()..\n";
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
     std::atomic<int> counter{0};
     for (int i = 0; i < 50; i++) {
       as->async([as, &counter]() {
@@ -814,6 +826,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
     while (counter < 500) asyik::sleep_for(std::chrono::milliseconds(50));
 
     LOG(INFO) << "performing client requests from inside async() done.\n";
+#endif
 
     // test what if, we dont close the server properly
     // server->close();
@@ -836,6 +849,7 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
       auto server = asyik::make_http_server(as, "127.0.0.1", 4009, true);
       LOG(INFO) << "multi-bind(http) success\n";
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
       // This holds the self-signed certificate used by the server
       ssl::context ctx{ssl::context::tlsv12};
       load_server_certificate(ctx);
@@ -844,9 +858,12 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
       auto server2 =
           asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4010, true);
       LOG(INFO) << "multi-bind(https) success\n";
+#endif
 
       bool flag_http = false;
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
       bool flag_https = false;
+#endif
 
       server->on_http_request("/flag", "GET",
 #if __cplusplus >= 201402L
@@ -859,6 +876,7 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
                                 req->response.result(200);
                               });
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
       server2->on_http_request("/flag", "GET",
 #if __cplusplus >= 201402L
                                [&flag_https](auto req, auto args) {
@@ -869,6 +887,7 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
                                  req->response.body = "flagging ok";
                                  req->response.result(200);
                                });
+#endif
 
       as->execute([&stopped, as]() {
         while (!stopped) asyik::sleep_for(std::chrono::milliseconds(10));
@@ -877,7 +896,9 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
 
       as->run();
       REQUIRE(flag_http);
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
       REQUIRE(flag_https);
+#endif
     }  // namespace asyik
     );
     t.detach();
@@ -889,9 +910,11 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
       auto req =
           asyik::http_easy_request(as, "GET", "http://127.0.0.1:4009/flag");
       REQUIRE(req->response.result() == 200);
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
       auto req2 =
           asyik::http_easy_request(as, "GET", "https://127.0.0.1:4010/flag");
       REQUIRE(req2->response.result() == 200);
+#endif
     }
     stopped = true;
     as->stop();
@@ -906,12 +929,14 @@ TEST_CASE("Test for multipart", "[http]")
   auto as = asyik::make_service();
   auto server = asyik::make_http_server(as, "127.0.0.1", 4011, true);
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
   // This holds the self-signed certificate used by the server
   ssl::context ctx{ssl::context::tlsv12};
   load_server_certificate(ctx);
 
   auto server2 =
       asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 4012, true);
+#endif
 
   server->on_http_request(
       "/multipart", "GET",
@@ -966,6 +991,7 @@ TEST_CASE("Test for multipart", "[http]")
             .get();
       });
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
   server2->on_http_request(
       "/multipart", "GET",
 #if __cplusplus >= 201402L
@@ -1018,6 +1044,7 @@ TEST_CASE("Test for multipart", "[http]")
                           use_fiber_future)
             .get();
       });
+#endif
 
   as->execute([as]() {
     REQUIRE_THROWS_AS(
@@ -1035,6 +1062,7 @@ TEST_CASE("Test for multipart", "[http]")
           REQUIRE_FALSE(req->multipart_response.body.compare(body));
         });
 
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
     // SSL Part
     REQUIRE_THROWS_AS(
         http_easy_request(as, "GET", "https://127.0.0.1:4012/multipart"),
@@ -1051,6 +1079,7 @@ TEST_CASE("Test for multipart", "[http]")
 
           REQUIRE_FALSE(req->multipart_response.body.compare(body));
         });
+#endif
 
     as->stop();
   }  // namespace asyik

@@ -1,6 +1,19 @@
 cmake_minimum_required(VERSION 3.14)
 
-add_library(${PROJECT_NAME} service.cpp http.cpp)
+add_library(${PROJECT_NAME} 
+    service.cpp 
+    http_common.cpp 
+    http_server_plain.cpp
+    http_client.cpp 
+    http_websocket.cpp
+    http_websocket_plain.cpp
+    http_websocket_ssl.cpp
+)
+
+if(LIBASYIK_ENABLE_SSL_SERVER)
+    target_sources(${PROJECT_NAME} PRIVATE http_server_ssl.cpp)
+endif()
+
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
