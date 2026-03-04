@@ -22,7 +22,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
 target_include_directories(${PROJECT_NAME} PRIVATE external/cppcodec)
 target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
 
-target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
 install(
   TARGETS ${PROJECT_NAME}

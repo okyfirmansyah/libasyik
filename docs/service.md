@@ -345,3 +345,33 @@ You can get the originated `asyik::service` that the asynchronous tasks are disp
     });
   });
 ```
+
+### Run Service Until All Tasks Complete
+
+`as->run()` normally blocks until `as->stop()` is called explicitly. Pass `true` to make the service automatically stop once all spawned fibers and async tasks finish — useful for one-shot CLI tools or tests:
+
+```c++
+int main()
+{
+  auto as = asyik::make_service();
+
+  as->execute([as]() {
+    // do some work...
+    LOG(INFO) << "fiber done\n";
+    // no need to call as->stop() explicitly
+  });
+
+  as->run(true); // exits automatically when all fibers/tasks complete
+}
+```
+
+### Configure Worker Thread Pool Size
+
+Libasyik maintains an internal worker thread pool used by `async()` for blocking or CPU-intensive tasks. By default the pool size is `hardware_concurrency × 5`. Override it with the `ASYIK_THREAD_MULTIPLIER` environment variable before starting the process:
+
+```bash
+# use 2× hardware_concurrency worker threads instead of the default 5×
+ASYIK_THREAD_MULTIPLIER=2 ./my_server
+```
+
+Invalid or non-positive values silently fall back to `5`.
