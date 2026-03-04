@@ -18,11 +18,13 @@ std::string route_spec_to_regex(string_view route_spc)
   std::regex specialChars{R"([-[\]{}/()*+?.,\^$|#])"};
   regex_spec = std::regex_replace(regex_spec, specialChars, R"(\$&)");
 
-  // step 3: replace <int> and <string>
+  // step 3: replace <int>, <string>, and <path>
   std::regex int_tag{R"(<\s*int\s*>)"};
   regex_spec = std::regex_replace(regex_spec, int_tag, R"(([0-9]+))");
   std::regex string_tag{R"(<\s*string\s*>)"};
   regex_spec = std::regex_replace(regex_spec, string_tag, R"(([^\/\?\s]+))");
+  std::regex path_tag{R"(<\s*path\s*>)"};
+  regex_spec = std::regex_replace(regex_spec, path_tag, R"(([^?#\s]*))");
 
   // step 4: add ^...$ and optional trailing /
   regex_spec = "^" + regex_spec + R"(\/?(|\?[^\?\s]*)$)";

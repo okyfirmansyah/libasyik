@@ -15,6 +15,7 @@
 #include "boost/fiber/all.hpp"
 #include "common.hpp"
 #include "error.hpp"
+#include "http_static.hpp"
 #include "http_types.hpp"
 #include "service.hpp"
 
@@ -95,7 +96,40 @@ class http_server
   {
     ws_routes.push_back({"", std::forward<R>(r), std::forward<T>(cb)});
   }
+  /// Serve static files from @p root_dir under the URL prefix @p url_prefix.
+  ///
+  /// All GET requests whose target starts with @p url_prefix are handled by
+  /// reading files from @p root_dir. The remaining path after stripping the
+  /// prefix is appended to @p root_dir to locate the file.
+  ///
+  /// Features enabled by default (all controllable via @p cfg):
+  ///  - MIME type detection from file extension
+  ///  - ETag + If-None-Match → 304 Not Modified
+  ///  - Last-Modified + If-Modified-Since → 304 Not Modified
+  ///  - Range: bytes=A-B → 206 Partial Content
+  ///  - Path-traversal guard (realpath() + canonical-root prefix check)
+  ///  - Directory URL → serves cfg.index_file (default "index.html")
+  ///
+  /// Example:
+  ///   server->serve_static("/static", "/var/www/html");
+  void serve_static(string_view url_prefix, string_view root_dir,
+                    const static_file_config& cfg = {})
+  {
+    std::string prefix{url_prefix};
+    if (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
 
+    // Escape regex-special characters found in the prefix.
+    static const std::regex special_chars{R"([-[\]{}/()*+?.,\^$|#])"};
+    std::string escaped =
+        std::regex_replace(prefix, special_chars, R"(\$&)");
+
+    // Pattern: <escaped-prefix>  then optionally  /<path>  then query string.
+    std::regex re("^" + escaped + R"((\/[^?#\s]*)?(|\?[^\?\s]*)$)");
+
+    on_http_request_regex(
+        re, "GET",
+        internal::make_static_file_handler(prefix, std::string{root_dir}, cfg));
+  }
   template <typename Req>
   http_connection_ptr<stream_type> get_request_connection(const Req& req)
   {
