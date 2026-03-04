@@ -315,6 +315,78 @@ void main()
   }
 ```
 
+#### Static File Serving
+
+Libasyik can serve an entire directory tree of static files with a single call to **`serve_static()`**. Include `libasyik/http.hpp` — no extra header is required.
+
+```c++
+#include "libasyik/service.hpp"
+#include "libasyik/http.hpp"
+
+int main()
+{
+    auto as = asyik::make_service();
+    auto server = asyik::make_http_server(as, "127.0.0.1", 8080);
+
+    // All GET /static/* requests are served from /var/www/html
+    server->serve_static("/static", "/var/www/html");
+
+    as->run();
+}
+```
+
+Every `GET` request whose URL starts with the given prefix is mapped to the corresponding file under `root_dir`. For example, `GET /static/css/app.css` reads `/var/www/html/css/app.css`.
+
+##### What is handled automatically
+
+| Feature | Behaviour |
+|---|---|
+| **MIME types** | Derived from the file extension (`.html`, `.css`, `.js`, `.json`, `.png`, `.svg`, `.woff2`, `.wasm`, … — falls back to `application/octet-stream`) |
+| **ETag** | A quoted `"mtime-size"` tag is sent; `If-None-Match` matching returns `304 Not Modified` |
+| **Last-Modified** | RFC 7231 date header is sent; `If-Modified-Since` matching returns `304 Not Modified` |
+| **Range requests** | `Range: bytes=A-B` returns `206 Partial Content` with the requested byte slice |
+| **Directory URLs** | A URL that resolves to a directory is redirected to the configured index file (`index.html` by default) |
+| **Path-traversal guard** | `realpath()` is used to canonicalise every path; requests that escape `root_dir` are rejected with `403 Forbidden` |
+| **Query strings** | Query and fragment portions of the URL are stripped before the file path is resolved |
+| **Percent-encoding** | `%XX` sequences in the URL path are decoded before the file lookup |
+
+##### Customising behaviour with `static_file_config`
+
+```c++
+asyik::static_file_config cfg;
+cfg.enable_etag          = true;               // default: true
+cfg.enable_last_modified = true;               // default: true
+cfg.enable_range         = true;               // default: true
+cfg.cache_control        = "no-cache";         // default: "public, max-age=3600"
+cfg.index_file           = "index.html";       // default: "index.html"
+
+server->serve_static("/assets", "./public", cfg);
+```
+
+##### Multiple prefixes and HTTPS
+
+`serve_static()` can be called multiple times to map different URL prefixes to different directories. It works identically with `make_https_server()`:
+
+```c++
+server->serve_static("/static",     "/var/www/html");
+server->serve_static("/downloads",  "/srv/files");
+
+// Works the same way on an HTTPS server
+auto https_server = asyik::make_https_server(as, std::move(ssl_ctx), "0.0.0.0", 443);
+https_server->serve_static("/static", "/var/www/html");
+```
+
+##### HTTP response codes
+
+| Condition | Status |
+|---|---|
+| File found and served in full | `200 OK` |
+| Conditional GET matches (ETag / Last-Modified) | `304 Not Modified` |
+| Valid `Range` header | `206 Partial Content` |
+| File or directory not found | `404 Not Found` |
+| Path-traversal attempt or directory without index file | `403 Forbidden` |
+| Malformed `Range` header | `400 Bad Request` |
+
 #### HTTP Client with Digest Authentication
 
 The HTTP client automatically handles servers that require [HTTP Digest Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication#digest_authentication_scheme). Embed credentials directly in the URL using the standard `user:password@host` format. When the server replies with `401 Unauthorized`, the client retries the request automatically with the correct `Authorization: Digest …` header — no extra code needed:

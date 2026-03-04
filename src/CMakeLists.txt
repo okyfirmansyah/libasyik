@@ -5,6 +5,7 @@ add_library(${PROJECT_NAME}
     http_common.cpp 
     http_server_plain.cpp
     http_client.cpp 
+    http_static.cpp
     http_websocket.cpp
     http_websocket_plain.cpp
     http_websocket_ssl.cpp

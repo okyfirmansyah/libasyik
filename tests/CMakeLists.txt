@@ -8,7 +8,7 @@ SET(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} ${GCC_COVERAGE_COMPILE_FLAG
 SET(CMAKE_EXE_LINKER_FLAGS_DEBUG  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} ${GCC_COVERAGE_LINK_FLAGS}" )
 
 add_executable(${PROJECT_NAME} test.cpp)
-target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memcache.cpp test_rate_limit.cpp)
+target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memcache.cpp test_rate_limit.cpp test_static.cpp)
 
 if(LIBASYIK_ENABLE_SOCI)
     target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp)
