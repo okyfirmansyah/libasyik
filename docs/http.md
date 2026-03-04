@@ -315,6 +315,55 @@ void main()
   }
 ```
 
+#### HTTP Client with Digest Authentication
+
+The HTTP client automatically handles servers that require [HTTP Digest Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication#digest_authentication_scheme). Embed credentials directly in the URL using the standard `user:password@host` format. When the server replies with `401 Unauthorized`, the client retries the request automatically with the correct `Authorization: Digest …` header — no extra code needed:
+
+```c++
+// Credentials embedded in URL: http://username:password@host/path
+auto req = asyik::http_easy_request(as, "GET",
+    "http://admin:s3cr3t@192.168.1.1/api/status");
+
+if (req->response.result() == 200)
+  LOG(INFO) << "authenticated!\n";
+```
+
+Digest auth works transparently with `http_easy_request_multipart` as well:
+
+```c++
+http_easy_request_multipart(
+    as, "GET",
+    "http://admin:s3cr3t@192.168.1.1/cgi-bin/stream",
+    [](http_request_ptr req) {
+      LOG(INFO) << "got part: " << req->multipart_response.body << "\n";
+    });
+```
+
+**Notes:**
+- Only [Digest authentication](https://datatracker.ietf.org/doc/html/rfc7616) (MD5) is handled automatically. Basic auth is **not** injected.
+- URL-encoded characters in the password (e.g. `p%40ss` → `p@ss`) are decoded automatically.
+- If the server does not return `401`, the request is sent without any auth header, even when credentials are present in the URL.
+
+##### Parsing URLs with embedded credentials
+
+`http_analyze_url()` now also extracts `username`, `password`, and `authority` from the URL. `http_url_scheme` is now a class with accessor methods (previously plain struct fields):
+
+```c++
+asyik::http_url_scheme scheme;
+asyik::http_analyze_url("https://user:p%40ss@10.0.0.1:8443/path?q=1", scheme);
+
+scheme.host()      // "10.0.0.1"
+scheme.port()      // 8443
+scheme.username()  // "user"
+scheme.password()  // "p@ss"  (URL-decoded)
+scheme.is_ssl()    // true
+scheme.target()    // "/path?q=1"
+scheme.authority() // "user:p%40ss@10.0.0.1:8443"
+scheme.get_url_view() // boost::urls::url_view for full URL inspection
+```
+
+> ⚠️ **Breaking change**: `http_url_scheme` fields are now private. Replace direct member access (`scheme.host`, `scheme.port`, `scheme.is_ssl`, `scheme.target`) with the corresponding accessor methods (`scheme.host()`, `scheme.port()`, `scheme.is_ssl()`, `scheme.target()`).
+
 #### HTTP Client Get Multipart Response
 For now, libasyik only support receiving multipart response in client:
 ```c++
@@ -334,11 +383,47 @@ auto req = http_easy_request_multipart(as, "GET", "https://127.0.0.1:4012/multip
         });
 ```
 
+The following `Content-Type` values are recognised as multipart responses and handled automatically:
+- `multipart/x-mixed-replace` (e.g. MJPEG camera streams)
+- `multipart/mixed` (RFC 2046 mixed multipart)
+- `multipart/form-data`
+
 Multipart interface above will be called incrementally for every part encountered. It is the responsibility of caller to accumulate all the data if required. This interface is designed to support long/persistent connection, for e.g supporting video streaming. In that case, http_easy_request_multipart should be called using the interface with timeout override.
 
 Note also that the interface similar to the http_easy_request, only the difference is the lambda function handling each multipart segments. You can use various override to send data, set headers or set the timeout. The returned req will behave like http_easy_request but only the header will be valid.
 
 To send multipart response from the server, for now libasyik only support it using manual handling on sending data down the stream(see the next section). You must serialize your own multipart HTTP message. You can use Boost::beast serializer library if you need more elaborate functionalities.
+
+#### Getting the Remote Client Address
+
+`http_connection` (obtained through `req->get_connection_handle(server)`) exposes `get_remote_endpoint()`, which returns the TCP endpoint (`boost::asio::ip::tcp::endpoint`) of the connected client:
+
+```c++
+server->on_http_request("/info", "GET", [server](auto req, auto args) {
+  auto connection = req->get_connection_handle(server);
+  auto ep = connection->get_remote_endpoint();
+
+  LOG(INFO) << "request from " << ep.address().to_string()
+            << ":" << ep.port() << "\n";
+
+  req->response.body = "your IP: " + ep.address().to_string();
+  req->response.result(200);
+});
+```
+
+For WebSocket handlers, access the connection through `ws->request`:
+
+```c++
+server->on_websocket("/ws", [server](auto ws, auto args) {
+  auto ep = ws->request->get_connection_handle(server)->get_remote_endpoint();
+  LOG(INFO) << "WebSocket connection from " << ep.address().to_string() << "\n";
+
+  while (1) {
+    auto s = ws->get_string();
+    ws->send_string(s);
+  }
+});
+```
 
 #### Advanced Topic: Handle HTTP Connection and Its Responses Manually
 Sometimes we want to do something different that simple HTTP request and response, one use case is doing server side event stream(SSE) so the client can have mutiple datas/events, transmitted in realtime and on a single, long connection.

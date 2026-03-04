@@ -77,25 +77,34 @@ void service::run(bool stop_on_complete)
   std::shared_ptr<boost::asio::io_service::work> work;
 
   // in-thread io_service loop
-  int idle_threshold = 30000;
+  // Use adaptive sleep to avoid busy-polling and excessive clock_gettime
+  // syscalls, which are especially expensive on VPS/cloud environments where
+  // clock_gettime may not be handled by vDSO and becomes a real syscall.
+  int idle_count = 0;
   while (!stopped && (!stop_on_complete || execute_task_count > 0)) {
-    if (!io_service.poll()) {
-      if (idle_threshold) {
-        idle_threshold--;
-        asyik::sleep_for(std::chrono::microseconds(10));
+    if (io_service.poll()) {
+      idle_count = 0;
+    } else {
+      idle_count++;
+      if (idle_count < 100) {
+        // brief spin phase: yield to other fibers quickly
+        boost::this_fiber::yield();
+      } else if (idle_count < 200) {
+        // short sleep phase
+        asyik::sleep_for(std::chrono::microseconds(100));
       } else {
-        asyik::sleep_for(std::chrono::microseconds(1000));
+        // deep idle: sleep longer to minimize CPU/syscall overhead
+        asyik::sleep_for(std::chrono::milliseconds(5));
       }
-    } else
-      idle_threshold = 30000;
+    }
     if (!stopped && (!stop_on_complete || execute_task_count > 0))
       io_service.restart();
   }
 
   execute_tasks->close();
-  for (int i = 0; i < 10000; i++) {
-    io_service.poll();  // build-in thread only
-    asyik::sleep_for(std::chrono::microseconds(10));
+  for (int i = 0; i < 1000; i++) {
+    io_service.poll();  // built-in thread only
+    asyik::sleep_for(std::chrono::microseconds(100));
   }
 
   fb.join();
