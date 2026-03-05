@@ -31,6 +31,7 @@
 #include "http_server.hpp"
 #include "http_types.hpp"
 #include "http_websocket.hpp"
+#include "profiling.hpp"
 
 namespace fibers = boost::fibers;
 using fiber = boost::fibers::fiber;
@@ -443,22 +444,25 @@ void http_connection<StreamType>::start()
           auto& req = asyik_req->beast_request;
           asyik_req->connection_wptr = http_connection_wptr<StreamType>(p);
           while (1) {
-            http::request_parser<http::empty_body> empty_parser;
-            empty_parser.header_limit(header_limit);
-            empty_parser.body_limit(body_limit);
+            // Single-pass read: parse header + body in one async_read call
+            // (eliminates the extra fiber suspend/resume of the old two-phase
+            // async_read_header + async_read approach).
+            http::request_parser<http::string_body> req_parser;
+            req_parser.header_limit(header_limit);
+            req_parser.body_limit(body_limit);
 
             asyik_req->buffer.clear();
-            asyik::internal::http::async_read_header(
-                p->get_stream(), asyik_req->buffer, empty_parser)
-                .get();
-            safe_to_close = false;
-
-            http::request_parser<http::string_body> req_parser{
-                std::move(empty_parser)};
-
+#ifdef LIBASYIK_HTTP_PROFILING
+            auto _p_t0 = std::chrono::steady_clock::now();
+#endif
             asyik::internal::http::async_read(p->get_stream(),
                                               asyik_req->buffer, req_parser)
                 .get();
+#ifdef LIBASYIK_HTTP_PROFILING
+            asyik::profiling::g_http_prof.read_request.record(
+                ASYIK_PROF_NS(_p_t0));
+#endif
+            safe_to_close = false;
             req = req_parser.release();
 
             asyik_req->set_url_view();
@@ -529,10 +533,21 @@ void http_connection<StreamType>::start()
 
                 try {
                   http_route_args args;
+#ifdef LIBASYIK_HTTP_PROFILING
+                  auto _p_t2 = std::chrono::steady_clock::now();
+#endif
                   const http_route_tuple& route =
                       server->find_http_route(req, args);
-
+#ifdef LIBASYIK_HTTP_PROFILING
+                  asyik::profiling::g_http_prof.route_match.record(
+                      ASYIK_PROF_NS(_p_t2));
+                  auto _p_t3 = std::chrono::steady_clock::now();
+#endif
                   std::get<2>(route)(asyik_req, args);
+#ifdef LIBASYIK_HTTP_PROFILING
+                  asyik::profiling::g_http_prof.handler.record(
+                      ASYIK_PROF_NS(_p_t3));
+#endif
                 } catch (not_found_error& e) {
                   asyik_req->response.body = "";
                   asyik_req->response.result(404);
@@ -550,8 +565,19 @@ void http_connection<StreamType>::start()
               }
 
               asyik_req->response.beast_response.prepare_payload();
+#ifdef LIBASYIK_HTTP_PROFILING
+              auto _p_t4 = std::chrono::steady_clock::now();
+#endif
               http::serializer<false, http::string_body> sr{res};
               asyik::internal::http::async_write(p->get_stream(), res).get();
+#ifdef LIBASYIK_HTTP_PROFILING
+              asyik::profiling::g_http_prof.write_response.record(
+                  ASYIK_PROF_NS(_p_t4));
+              asyik::profiling::g_http_prof.total.record(static_cast<uint64_t>(
+                  std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - _p_t0)
+                      .count()));
+#endif
 
               if (!req.need_eof()) break;
 

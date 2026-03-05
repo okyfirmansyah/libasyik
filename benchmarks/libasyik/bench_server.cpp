@@ -33,6 +33,7 @@
 
 #include "aixlog.hpp"
 #include "libasyik/http.hpp"
+#include "libasyik/profiling.hpp"
 #include "libasyik/service.hpp"
 
 // Pre-built constant responses (no per-request allocation)
@@ -143,6 +144,41 @@ int main(int argc, char* argv[])
             << "  POST /echo\n"
             << "  GET  /delay/<ms>\n";
 
+#ifdef LIBASYIK_HTTP_PROFILING
+  // ── Profiling reporter thread ──────────────────────────────────────────────
+  // Wakes every ASYIK_PROF_INTERVAL seconds (default 5), prints a per-stage
+  // breakdown, then resets counters.  Runs until a stop flag is set.
+  int prof_interval_s = 5;
+  if (const char* e = std::getenv("ASYIK_PROF_INTERVAL")) {
+    int v = std::atoi(e);
+    if (v > 0) prof_interval_s = v;
+  }
+  std::atomic<bool> prof_stop{false};
+  std::thread prof_thread([&prof_stop, prof_interval_s]() {
+    std::cout
+        << "[profiling] Reporter active — interval " << prof_interval_s
+        << "s  (disable with LIBASYIK_HTTP_PROFILING=OFF at cmake time)\n";
+    while (!prof_stop.load(std::memory_order_relaxed)) {
+      auto deadline = std::chrono::steady_clock::now() +
+                      std::chrono::seconds(prof_interval_s);
+      // Sleep in small steps so the stop flag is checked promptly.
+      while (!prof_stop.load(std::memory_order_relaxed) &&
+             std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      if (prof_stop.load(std::memory_order_relaxed)) break;
+      asyik::profiling::report(static_cast<double>(prof_interval_s));
+      asyik::profiling::reset();
+    }
+  });
+#endif
+
   for (auto& t : threads) t.join();
+
+#ifdef LIBASYIK_HTTP_PROFILING
+  prof_stop.store(true, std::memory_order_relaxed);
+  prof_thread.join();
+#endif
+
   return 0;
 }
