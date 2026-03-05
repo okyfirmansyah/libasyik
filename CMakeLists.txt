@@ -12,6 +12,13 @@ add_subdirectory(external/Catch2)
 add_subdirectory(src)
 add_subdirectory(tests)
 
+# Optional benchmark executables (built in Release/-O3 regardless of parent build type)
+# Enable with:  cmake -DLIBASYIK_BUILD_BENCHMARKS=ON ..
+option(LIBASYIK_BUILD_BENCHMARKS "Build HTTP benchmark server executables" OFF)
+if(LIBASYIK_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
