@@ -7,6 +7,7 @@
 #   3. Fetches GIN dependencies (go mod tidy)
 #   4. Builds libasyik bench_server (Release, -O3)
 #   5. Builds GIN bench_gin binary
+#   6. Builds Boost.Beast direct bench_beast binary
 #
 # Run once from the repo root:
 #   bash benchmarks/setup.sh
@@ -92,7 +93,7 @@ GOPATH="${HOME}/go" GONOSUMDB="*" GOFLAGS="-mod=mod" go mod tidy
 success "GIN dependencies ready."
 
 # ── 4. Build libasyik bench_server ────────────────────────────────────────────
-info "Step 4/5: Building libasyik bench_server (Release / -O3) ..."
+info "Step 4/6: Building libasyik bench_server (Release / -O3) ..."
 mkdir -p "${BUILD_BENCH_DIR}"
 cd "${BUILD_BENCH_DIR}"
 
@@ -106,16 +107,24 @@ cmake "${REPO_ROOT}" \
     -Wno-dev
 
 cmake --build . --target bench_server --parallel "$(nproc)"
+cmake --build . --target bench_beast  --parallel "$(nproc)"
 
 BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_server"
 [[ -x "${BENCH_BIN}" ]] || die "bench_server binary not found at ${BENCH_BIN}"
 success "Built: ${BENCH_BIN}"
 
-# ── 5. Build GIN bench binary ──────────────────────────────────────────────────
-info "Step 5/5: Building GIN bench_gin binary ..."
+BEAST_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_beast"
+[[ -x "${BEAST_BENCH_BIN}" ]] || die "bench_beast binary not found at ${BEAST_BENCH_BIN}"
+success "Built: ${BEAST_BENCH_BIN}"
+
+# ── 5. Build GIN bench binary ──────────────────────────────────────────────────────
+info "Step 5/6: Building GIN bench_gin binary ..."
 cd "${SCRIPT_DIR}/gin"
 GOPATH="${HOME}/go" GONOSUMDB="*" go build -ldflags="-s -w" -o bench_gin .
 success "Built: ${SCRIPT_DIR}/gin/bench_gin"
+
+# ── 6. bench_beast is already built in step 4 alongside bench_server ─────────────────────────────────────
+info "Step 6/6: bench_beast already built in step 4 (same CMake build tree) — done."
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 echo ""
@@ -124,6 +133,7 @@ echo -e "${GREEN}║          Benchmark environment ready!                ║${N
 echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  libasyik server: ${BUILD_BENCH_DIR}/benchmarks/bench_server  ${NC}"
 echo -e "${GREEN}║  GIN server:      ${SCRIPT_DIR}/gin/bench_gin        ${NC}"
+echo -e "${GREEN}║  Beast server:    ${BUILD_BENCH_DIR}/benchmarks/bench_beast    ${NC}"
 echo -e "${GREEN}║  wrk:             $(command -v wrk)                  ${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  Run benchmarks:                                     ║${NC}"

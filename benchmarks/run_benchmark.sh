@@ -2,20 +2,22 @@
 # benchmarks/run_benchmark.sh
 #
 # Runs the full HTTP benchmark suite against libasyik and/or GIN.
-# Requires: wrk, bench_server (libasyik), bench_gin (GIN)  – run setup.sh first.
+# Requires: wrk, bench_server (libasyik), bench_gin (GIN), bench_beast – run setup.sh first.
 #
 # Usage:
 #   bash benchmarks/run_benchmark.sh [OPTIONS]
 #
 # Options:
-#   --target=<libasyik|gin|all>   Which server to benchmark  (default: all)
-#   --port=<N>                    Port for the server         (default: 8080)
-#   --duration=<N>                Seconds per wrk run         (default: 20)
-#   --threads=<N>                 wrk worker threads          (default: 4)
+#   --target=<libasyik|gin|beast|all>  Which server(s) to benchmark  (default: all)
+#   --port=<N>                    Port for libasyik server      (default: 8080)
+#   --gin-port=<N>                Port for GIN server           (default: 8082)
+#   --beast-port=<N>              Port for Beast server         (default: 8084)
+#   --duration=<N>                Seconds per wrk run           (default: 20)
+#   --threads=<N>                 wrk worker threads            (default: 4)
 #   --concurrency=<a,b,c,...>     Comma-separated concurrencies (default: 50,100,200,500)
-#   --delay-ms=<N>                Delay for scenario D in ms  (default: 5)
-#   --thread-multiplier=<N>       ASYIK_THREAD_MULTIPLIER     (default: 4)
-#   --output-dir=<PATH>           Where to save raw results   (default: benchmarks/results/TIMESTAMP)
+#   --delay-ms=<N>                Delay for scenario D in ms    (default: 5)
+#   --thread-multiplier=<N>       ASYIK_THREAD_MULTIPLIER       (default: 4)
+#   --output-dir=<PATH>           Where to save raw results     (default: benchmarks/results/TIMESTAMP)
 #
 # Example:
 #   bash benchmarks/run_benchmark.sh --target=all --concurrency=100,200,500 --duration=30
@@ -38,6 +40,7 @@ die()     { echo -e "${RED}[bench] ERROR:${NC} $*" >&2; exit 1; }
 TARGET="all"
 PORT=8080
 GIN_PORT=8082
+BEAST_PORT=8086
 DURATION=20
 THREADS=4
 CONCURRENCY="50,100,200,500"
@@ -52,6 +55,7 @@ for arg in "$@"; do
         --target=*)           TARGET="${arg#*=}" ;;
         --port=*)             PORT="${arg#*=}" ;;
         --gin-port=*)         GIN_PORT="${arg#*=}" ;;
+        --beast-port=*)       BEAST_PORT="${arg#*=}" ;;
         --duration=*)         DURATION="${arg#*=}" ;;
         --threads=*)          THREADS="${arg#*=}" ;;
         --concurrency=*)      CONCURRENCY="${arg#*=}" ;;
@@ -70,6 +74,7 @@ done
 
 LIBASYIK_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_server"
 GIN_BIN="${SCRIPT_DIR}/gin/bench_gin"
+BEAST_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_beast"
 SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 
 GO_BIN="/usr/local/go/bin"
@@ -85,6 +90,10 @@ fi
 if [[ "${TARGET}" == "gin" || "${TARGET}" == "all" ]]; then
     [[ -x "${GIN_BIN}" ]] || \
         die "bench_gin not found at ${GIN_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "beast" || "${TARGET}" == "all" ]]; then
+    [[ -x "${BEAST_BIN}" ]] || \
+        die "bench_beast not found at ${BEAST_BIN}. Run: bash benchmarks/setup.sh"
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -263,6 +272,27 @@ bench_libasyik() {
     trap - EXIT
 }
 
+# ── Benchmark runner for Boost.Beast (direct, no libasyik) ───────────────────
+bench_beast() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Boost.Beast direct  (port ${BEAST_PORT})"
+    header "  (raw Beast/Asio — theoretical performance ceiling)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_beast 2>/dev/null || true; sleep 1
+
+    BEAST_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${BEAST_BIN}" "${BEAST_PORT}" \
+        >"${OUTPUT_DIR}/beast_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${BEAST_PORT}"
+    run_all_scenarios "Beast" "${BEAST_PORT}" "beast"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
 # ── Benchmark runner for GIN ───────────────────────────────────────────────────
 bench_gin() {
     header "══════════════════════════════════════════════════════════"
@@ -290,6 +320,7 @@ echo -e "${BOLD}Benchmark Configuration${NC}"
 echo "  Target:             ${TARGET}"
 echo "  Port (libasyik):    ${PORT}"
 echo "  Port (GIN):         ${GIN_PORT}"
+echo "  Port (Beast):       ${BEAST_PORT}"
 echo "  Duration per run:   ${DURATION}s"
 echo "  wrk threads:        ${THREADS}"
 echo "  Concurrency levels: ${CONCURRENCY}  (delay scenario: ${DELAY_CONCURRENCY})"
@@ -305,10 +336,15 @@ case "${TARGET}" in
     gin)
         bench_gin
         ;;
+    beast)
+        bench_beast
+        ;;
     all)
         bench_libasyik
         echo ""
         bench_gin
+        echo ""
+        bench_beast
         # ── Side-by-side comparison ───────────────────────────────────────
         header "══ COMPARISON SUMMARY ══"
         echo ""
@@ -317,9 +353,12 @@ case "${TARGET}" in
         echo ""
         echo -e "${BOLD}GIN${NC}"
         cat "${OUTPUT_DIR}/gin_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Boost.Beast (direct — theoretical ceiling)${NC}"
+        cat "${OUTPUT_DIR}/beast_summary.txt" 2>/dev/null || echo "(no data)"
         ;;
     *)
-        die "Unknown target '${TARGET}'. Use: libasyik | gin | all"
+        die "Unknown target '${TARGET}'. Use: libasyik | gin | beast | all"
         ;;
 esac
 

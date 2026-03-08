@@ -34,5 +34,24 @@ if(LIBASYIK_BENCH_PROFILING)
 endif()
 
 message(STATUS "Benchmark target: bench_server (port 8080 by default)")
+
+# ── bench_beast: raw Boost.Beast direct async server (no libasyik) ────────────
+# Re-running find_package here is idempotent; it reuses the Boost installation
+# already discovered by src/CMakeLists.txt.  bench_beast intentionally does NOT
+# link libasyik — the whole point is to measure the raw Beast/Asio ceiling.
+find_package(Boost REQUIRED)
+find_package(Threads REQUIRED)
+
+add_executable(bench_beast beast/bench_beast.cpp)
+
+target_compile_features(bench_beast PRIVATE cxx_std_17)
+target_compile_options(bench_beast PRIVATE ${BENCH_COMPILE_FLAGS})
+
+target_include_directories(bench_beast PRIVATE ${Boost_INCLUDE_DIR})
+
+# Boost.Beast and Boost.Asio are header-only on Linux — only Threads needed.
+target_link_libraries(bench_beast PRIVATE Threads::Threads)
+
+message(STATUS "Benchmark target: bench_beast (port 8086 by default)")
 message(STATUS "Build with: cmake -DLIBASYIK_BUILD_BENCHMARKS=ON ..")
 
