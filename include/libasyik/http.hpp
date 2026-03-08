@@ -568,7 +568,6 @@ void http_connection<StreamType>::start()
 #ifdef LIBASYIK_HTTP_PROFILING
               auto _p_t4 = std::chrono::steady_clock::now();
 #endif
-              http::serializer<false, http::string_body> sr{res};
               asyik::internal::http::async_write(p->get_stream(), res).get();
 #ifdef LIBASYIK_HTTP_PROFILING
               asyik::profiling::g_http_prof.write_response.record(
@@ -579,9 +578,17 @@ void http_connection<StreamType>::start()
                       .count()));
 #endif
 
-              if (!req.need_eof()) break;
+              // Close when the response says so (Connection: close, HTTP/1.0
+              // without keep-alive, or unknown body length). Otherwise loop
+              // back and serve the next request on this persistent connection.
+              if (res.need_eof()) {
+                safe_to_close = true;
+                break;
+              }
 
-              safe_to_close = true;
+              // Keep-alive: reset response state before the next request.
+              asyik_req->response.beast_response = http_beast_response{};
+              asyik_req->manual_response = false;
             }
           }
           p->shutdown_ssl();

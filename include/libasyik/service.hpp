@@ -164,6 +164,12 @@ class service : public std::enable_shared_from_this<service> {
   }
 
   std::atomic<bool> stopped;
+  // Counts dispatched fibers that have not yet fully exited (their function
+  // returned AND their captured objects destroyed). service::run() waits for
+  // this to reach zero before returning so that Asio-registered objects
+  // (e.g. beast::websocket::stream) are always destroyed while the
+  // io_context is still alive.
+  std::atomic<int> active_fiber_count{0};
   boost::asio::io_context io_service;
   boost::asio::io_context::strand strand;
   std::shared_ptr<fibers::buffered_channel<std::function<void()>>>

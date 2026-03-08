@@ -8,12 +8,11 @@
  * Enabled only when compiled with -DLIBASYIK_HTTP_PROFILING.
  *
  * Stages measured per HTTP request (server-side):
- *   read_header    – async_read_header()  (TCP recv + header parse)
- *   read_body      – async_read()         (body recv + parse)
+ *   read_request   – async_read() (TCP recv + HTTP header + body in one pass)
  *   route_match    – find_http_route()    (regex scan over route table)
  *   handler        – user route callback
  *   write_response – prepare_payload() + async_write()
- *   TOTAL          – read_header start → write_response end
+ *   TOTAL          – read_request start → write_response end
  *
  * All counters/sums are std::atomic so every service thread can write
  * without locks.  Stats are aggregated across all threads — call report()
@@ -90,7 +89,7 @@ inline void report(double elapsed_sec = 0.0)
   };
 
   uint64_t nreq = rows[4].s.count;
-  double total_avg_us = (nreq > 0) ? rows[5].s.total_ns / 1000.0 / nreq : 0.0;
+  double total_avg_us = (nreq > 0) ? rows[4].s.total_ns / 1000.0 / nreq : 0.0;
 
   std::printf("\n[profiling] HTTP Pipeline Breakdown");
   if (elapsed_sec > 0.0 && nreq > 0)

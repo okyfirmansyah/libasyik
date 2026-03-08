@@ -94,6 +94,10 @@ TEST_CASE("Test complex async rate limit(achieve qps)")
   });
 
   as->run();
+
+  // this is required because of the static variables in rate limit
+  // implementation, otherwise
+  asyik::sleep_for(std::chrono::milliseconds(1500));
 }
 
 TEST_CASE("Test complex async rate limit(contention)")

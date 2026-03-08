@@ -1432,6 +1432,315 @@ TEST_CASE("Test WS close handling", "[http]")
   as->run();
 }
 
+// ---------------------------------------------------------------------------
+// Raw-socket helpers used by the keep-alive tests.
+// Because libasyik uses cooperative (fiber) scheduling on a single OS thread,
+// we cannot do a blocking thread-join inside a fiber.  Instead we run the
+// synchronous Boost.Beast client work in a background std::thread and spin
+// the fiber with sleep_for(5ms) until the thread is done.  The yielding
+// allows the libasyik server fibers to process the incoming requests.
+// ---------------------------------------------------------------------------
+
+namespace keepalive_helpers {
+
+namespace net = boost::asio;
+namespace http = boost::beast::http;
+using tcp = net::ip::tcp;
+
+// Run `fn` in a background thread; from the *current fiber* poll with
+// sleep_for until done, then join.  Returns any exception thrown by fn.
+static std::exception_ptr run_bg(std::function<void()> fn)
+{
+  std::atomic<bool> done{false};
+  std::exception_ptr ex;
+
+  std::thread t([&] {
+    try {
+      fn();
+    } catch (...) {
+      ex = std::current_exception();
+    }
+    done.store(true, std::memory_order_release);
+  });
+
+  while (!done.load(std::memory_order_acquire))
+    asyik::sleep_for(std::chrono::milliseconds(5));
+
+  t.join();
+  return ex;
+}
+
+// Open a sync TCP socket to addr:port (blocking, run inside background thread).
+static tcp::socket connect_raw(net::io_context& ioc, const std::string& addr,
+                               uint16_t port)
+{
+  tcp::socket sock(ioc);
+  tcp::resolver resolver(ioc);
+  auto results = resolver.resolve(addr, std::to_string(port));
+  net::connect(sock, results);
+  return sock;
+}
+
+// Send one HTTP request and return the response.  buf is reused across calls
+// on the same keep-alive connection so framing state is preserved.
+static http::response<http::string_body> one_request(
+    tcp::socket& sock, boost::beast::flat_buffer& buf, http::verb verb,
+    const std::string& target, int version /* 11=HTTP/1.1, 10=HTTP/1.0 */,
+    bool explicit_close = false)
+{
+  http::request<http::string_body> req{verb, target, version};
+  req.set(http::field::host, "127.0.0.1");
+  if (explicit_close) req.set(http::field::connection, "close");
+  req.prepare_payload();
+  http::write(sock, req);
+
+  http::response<http::string_body> res;
+  http::read(sock, buf, res);
+  return res;
+}
+
+}  // namespace keepalive_helpers
+
+TEST_CASE("Test HTTP keep-alive and connection-close behavior",
+          "[http][keepalive]")
+{
+  namespace http = boost::beast::http;
+  namespace net = boost::asio;
+  using tcp = net::ip::tcp;
+  using namespace keepalive_helpers;
+
+  auto as = asyik::make_service();
+  // Port 4015 – not used by any other test case in this file.
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4015);
+
+  std::atomic<int> n_handled{0};
+
+  server->on_http_request(
+      "/ping", "GET",
+      [&n_handled](http_request_ptr req, const http_route_args&) {
+        n_handled.fetch_add(1, std::memory_order_relaxed);
+        req->response.body = "pong";
+        req->response.result(200);
+      });
+
+  server->on_http_request("/echo", "POST",
+                          [](http_request_ptr req, const http_route_args&) {
+                            req->response.body = req->body;
+                            req->response.result(200);
+                          });
+
+  // Route that returns the HTTP status code embedded in the URL so we can
+  // drive 200 / 404 / 500 from the client side.
+  server->on_http_request(
+      "/status/<int>", "GET",
+      [](http_request_ptr req, const http_route_args& args) {
+        req->response.body = "status=" + std::string(args[1]);
+        req->response.result(std::stoi(std::string(args[1])));
+      });
+
+  asyik::sleep_for(std::chrono::milliseconds(100));
+
+  as->execute([&]() {
+    // ------------------------------------------------------------------ //
+    // 1.  HTTP/1.1 keep-alive: N requests on ONE TCP connection            //
+    // ------------------------------------------------------------------ //
+    {
+      const int N = 8;
+      int ok_count = 0;
+      bool connection_reused = true;
+
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        for (int i = 0; i < N; i++) {
+          auto res = one_request(sock, buf, http::verb::get, "/ping", 11);
+          if (res.result() == http::status::ok) ok_count++;
+          // Server must advertise keep-alive on HTTP/1.1.
+          if (!res.keep_alive()) connection_reused = false;
+        }
+
+        // Graceful FIN
+        boost::beast::error_code ec;
+        sock.shutdown(tcp::socket::shutdown_both, ec);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(ok_count == N);
+      REQUIRE(connection_reused);
+      REQUIRE(n_handled.load() == N);
+      INFO("keep-alive: " << N << " requests served on one connection");
+    }
+
+    // ------------------------------------------------------------------ //
+    // 2.  Response state must NOT bleed between keep-alive requests.       //
+    //     Sequence: 200 → 404 → 200 → 500 → 200 on one socket.           //
+    // ------------------------------------------------------------------ //
+    {
+      n_handled.store(0);
+      struct Expect {
+        std::string route;
+        int code;
+      };
+      std::vector<Expect> seq = {
+          {"/ping", 200},       {"/status/404", 404}, {"/ping", 200},
+          {"/status/500", 500}, {"/ping", 200},
+      };
+
+      std::vector<int> got_codes;
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        for (auto& e : seq) {
+          auto res = one_request(sock, buf, http::verb::get, e.route, 11);
+          got_codes.push_back((int)res.result_int());
+        }
+
+        boost::beast::error_code ec;
+        sock.shutdown(tcp::socket::shutdown_both, ec);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(got_codes.size() == seq.size());
+      for (size_t i = 0; i < seq.size(); i++) {
+        INFO("request " << i << " expected " << seq[i].code << " got "
+                        << got_codes[i]);
+        REQUIRE(got_codes[i] == seq[i].code);
+      }
+    }
+
+    // ------------------------------------------------------------------ //
+    // 3.  Connection: close — server must close after one response.        //
+    // ------------------------------------------------------------------ //
+    {
+      bool server_closed = false;
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        // First request with explicit Connection: close
+        auto res = one_request(sock, buf, http::verb::get, "/ping", 11,
+                               /*explicit_close=*/true);
+        REQUIRE(res.result() == http::status::ok);
+        // Server side: need_eof() must be true → server already sent FIN
+        REQUIRE(!res.keep_alive());
+
+        // A second read must hit EOF immediately.
+        boost::beast::error_code ec;
+        http::response<http::string_body> res2;
+        http::read(sock, buf, res2, ec);
+        server_closed = (ec == http::error::end_of_stream ||
+                         ec == boost::asio::error::eof ||
+                         ec == boost::asio::error::connection_reset);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(server_closed);
+      INFO("Connection: close – server closed TCP after one response");
+    }
+
+    // ------------------------------------------------------------------ //
+    // 4.  HTTP/1.0 — keep-alive is off by default; server closes after    //
+    //     each response.                                                   //
+    // ------------------------------------------------------------------ //
+    {
+      bool server_closed = false;
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        // HTTP/1.0 request – no keep-alive negotiated
+        auto res = one_request(sock, buf, http::verb::get, "/ping", 10);
+        REQUIRE(res.result() == http::status::ok);
+        // Server must not advertise keep-alive for HTTP/1.0
+        REQUIRE(!res.keep_alive());
+
+        boost::beast::error_code ec;
+        http::response<http::string_body> res2;
+        http::read(sock, buf, res2, ec);
+        server_closed = (ec == http::error::end_of_stream ||
+                         ec == boost::asio::error::eof ||
+                         ec == boost::asio::error::connection_reset);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(server_closed);
+      INFO("HTTP/1.0 – server closed TCP after one response");
+    }
+
+    // ------------------------------------------------------------------ //
+    // 5.  POST body is not corrupted across keep-alive requests.           //
+    // ------------------------------------------------------------------ //
+    {
+      const int N = 6;
+      int ok_count = 0;
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        for (int i = 0; i < N; i++) {
+          std::string payload = "body-payload-" + std::to_string(i);
+          http::request<http::string_body> req{http::verb::post, "/echo", 11};
+          req.set(http::field::host, "127.0.0.1");
+          req.body() = payload;
+          req.prepare_payload();
+          http::write(sock, req);
+
+          http::response<http::string_body> res;
+          http::read(sock, buf, res);
+          if (res.result() == http::status::ok && res.body() == payload)
+            ok_count++;
+        }
+
+        boost::beast::error_code ec;
+        sock.shutdown(tcp::socket::shutdown_both, ec);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(ok_count == N);
+      INFO("POST echo: body intact across " << N << " keep-alive requests");
+    }
+
+    // ------------------------------------------------------------------ //
+    // 6.  Stress: 50 requests on one connection.                          //
+    // ------------------------------------------------------------------ //
+    {
+      const int N = 50;
+      int ok_count = 0;
+      n_handled.store(0);
+      auto ex = run_bg([&] {
+        net::io_context ioc;
+        auto sock = connect_raw(ioc, "127.0.0.1", 4015);
+        boost::beast::flat_buffer buf;
+
+        for (int i = 0; i < N; i++) {
+          auto res = one_request(sock, buf, http::verb::get, "/ping", 11);
+          if (res.result() == http::status::ok) ok_count++;
+        }
+
+        boost::beast::error_code ec;
+        sock.shutdown(tcp::socket::shutdown_both, ec);
+      });
+
+      if (ex) std::rethrow_exception(ex);
+      REQUIRE(ok_count == N);
+      REQUIRE(n_handled.load() == N);
+      INFO("stress: " << N << " requests on one connection, all OK");
+    }
+
+    server->close();
+    as->stop();
+  });
+
+  as->run();
+}
+
 TEST_CASE("Test http url view", "[http_url_view]")
 {
   auto as = asyik::make_service();
