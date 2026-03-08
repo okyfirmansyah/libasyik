@@ -69,7 +69,29 @@ void service::run(bool stop_on_complete)
     std::function<void()> tsk;
     while (!as->stopped && boost::fibers::channel_op_status::closed !=
                                as->execute_tasks->pop(tsk)) {
-      fiber fb([tsk_in = std::move(tsk)]() { tsk_in(); });
+      as->active_fiber_count.fetch_add(1, std::memory_order_relaxed);
+      fiber fb([tsk_in = std::move(tsk), as]() mutable {
+        // RAII guard: decrement the counter when this fiber finishes,
+        // regardless of exceptions. The guard destructor runs inside the
+        // still-active fiber (before Boost.Fiber GC takes over), so the
+        // decrement is always visible to the post-drain wait loop.
+        struct FiberGuard {
+          std::atomic<int>& ctr;
+          ~FiberGuard() noexcept
+          {
+            ctr.fetch_sub(1, std::memory_order_release);
+          }
+        } guard{as->active_fiber_count};
+
+        tsk_in();
+
+        // Eagerly destroy captured objects (beast streams, websockets, any
+        // Asio-registered handles) HERE, while this fiber is still executing
+        // and the io_context is provably alive.  When Boost.Fiber later
+        // reclaims this fiber's context, tsk_in is already empty so its
+        // destructor is a no-op and the use-after-free race is eliminated.
+        tsk_in = {};
+      });
       fb.detach();
     }
   });
@@ -102,12 +124,43 @@ void service::run(bool stop_on_complete)
   }
 
   execute_tasks->close();
-  for (int i = 0; i < 1000; i++) {
-    io_service.poll();  // built-in thread only
-    asyik::sleep_for(std::chrono::microseconds(100));
+
+  // Phase 1: drain the task channel – give all dispatched-but-not-yet-started
+  // fibers a chance to pick up their task and begin executing.
+  for (int i = 0; i < 200; i++) {
+    io_service.poll();
+    boost::this_fiber::yield();
   }
 
   fb.join();
+
+  // Phase 2: wait until every active fiber has both finished executing its task
+  // AND destroyed its captured objects (tsk_in = {} above). This guarantees
+  // that Asio-registered objects (beast websocket streams, etc.) are destroyed
+  // while the io_context is still alive, preventing the use-after-free crash
+  // that occurs when Boost.Fiber defers context-reclaim past io_context
+  // teardown.
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (active_fiber_count.load(std::memory_order_acquire) > 0) {
+      if (std::chrono::steady_clock::now() > deadline) {
+        LOG(WARNING) << "service::run(): "
+                     << active_fiber_count.load(std::memory_order_relaxed)
+                     << " fiber(s) still active after 1s drain, forcing exit\n";
+        break;
+      }
+      io_service.poll();
+      boost::this_fiber::yield();
+    }
+    // Final flush: any deregistrations queued by the last batch of fiber
+    // completions are processed here, before the io_context is destroyed.
+    for (int i = 0; i < 20; i++) {
+      io_service.poll();
+      boost::this_fiber::yield();
+    }
+  }
+
   service::active_service.reset();
 }
 
