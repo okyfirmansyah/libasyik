@@ -29,15 +29,22 @@ jobs:
       - checkout
 
       - run:
-          name: Setup build environment
+          name: Install build tools (CMake, Ninja, LLVM)
           shell: powershell.exe
           command: |
-            $env:VCPKG_ROOT = "C:\vcpkg"
-            $env:VCPKG_FORCE_SYSTEM_BINARIES = "1"
-            $env:X_VCPKG_ASSET_SOURCES = "clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}"
-            [Environment]::SetEnvironmentVariable("VCPKG_ROOT", $env:VCPKG_ROOT, [System.EnvironmentVariableTarget]::Machine)
-            [Environment]::SetEnvironmentVariable("VCPKG_FORCE_SYSTEM_BINARIES", $env:VCPKG_FORCE_SYSTEM_BINARIES, [System.EnvironmentVariableTarget]::Machine)
-            [Environment]::SetEnvironmentVariable("X_VCPKG_ASSET_SOURCES", $env:X_VCPKG_ASSET_SOURCES, [System.EnvironmentVariableTarget]::Machine)
+            choco install -y cmake ninja llvm
+
+      - run:
+          name: Setup build environment
+          shell: cmd.exe
+          command: |
+            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+            set VCPKG_ROOT=C:\vcpkg
+            set VCPKG_FORCE_SYSTEM_BINARIES=1
+            set X_VCPKG_ASSET_SOURCES=clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}
+            set PATH=C:\Program Files\LLVM\bin;%PATH%
+            set PATH=C:\Program Files\CMake\bin;%PATH%
+            echo %PATH%
 
       - restore_cache:
           keys:
@@ -45,25 +52,35 @@ jobs:
 
       - run:
           name: Configure with CMake
-          shell: powershell.exe
-          command: cmake --preset windows-clang-cl
+          shell: cmd.exe
+          command: |
+            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+            set VCPKG_ROOT=C:\vcpkg
+            set VCPKG_FORCE_SYSTEM_BINARIES=1
+            set X_VCPKG_ASSET_SOURCES=clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}
+            set PATH=C:\Program Files\LLVM\bin;%PATH%
+            set PATH=C:\Program Files\CMake\bin;%PATH%
+            cmake --preset windows-clang-cl -DCMAKE_MAKE_PROGRAM=ninja
 
       - run:
           name: Build project
-          shell: powershell.exe
-          command: cmake --build build --config Debug -j 4
+          shell: cmd.exe
+          command: |
+            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+            set PATH=C:\Program Files\LLVM\bin;%PATH%
+            set PATH=C:\Program Files\CMake\bin;%PATH%
+            cmake --build build --config Debug
 
       - run:
           name: Run tests with SQL disabled
-          shell: powershell.exe
+          shell: cmd.exe
           command: |
-            $testExe = Get-ChildItem -Path "build" -Filter "libasyik_test.exe" -Recurse | Select-Object -First 1
-            if ($testExe) {
-              & $testExe.FullName '~[sql]' --reporter compact
-            } else {
-              Write-Error "libasyik_test.exe not found"
-              exit 1
-            }
+            set PATH=C:\vcpkg\installed\x64-windows\bin;%PATH%
+            for /f "delims=" %%x in ('dir /s /b build\tests\libasyik_test.exe') do (
+              %%x ~[sql] --reporter compact
+              exit /b !ERRORLEVEL!
+            )
+            exit /b 1
 
       - save_cache:
           key: vcpkg-cache-{{ checksum "vcpkg.json" }}
