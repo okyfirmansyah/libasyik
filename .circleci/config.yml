@@ -33,49 +33,66 @@ jobs:
       - checkout
 
       - run:
-          name: Install build tools
+          name: Install build tools from pre-built releases
           shell: powershell.exe
-          timeout: 3600
+          timeout: 1800
           command: |
-            # Install Visual Studio Build Tools with C++ workload if not present
-            if (-not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat")) {
-              Write-Host "Installing Visual Studio Build Tools..."
-              choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
-            }
-            # Install other tools
-            choco install -y cmake ninja llvm
+            # Download and install CMake
+            Write-Host "Installing CMake..."
+            choco install -y cmake --version=3.27.0
+
+            # Download and install Ninja
+            Write-Host "Installing Ninja..."
+            choco install -y ninja
+
+            # Download and install LLVM with clang-cl
+            Write-Host "Installing LLVM..."
+            choco install -y llvm --version=17.0.0
 
       - restore_cache:
           keys:
-            - vcpkg-cache-{{ checksum "vcpkg.json" }}
+            - vcpkg-cache-windows-{{ checksum "vcpkg.json" }}
+            - vcpkg-cache-windows-
 
       - run:
-          name: Configure with CMake
+          name: Configure and build
           shell: cmd.exe
           command: |
-            call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+            setlocal enabledelayedexpansion
+            set PATH=C:\Program Files\LLVM\bin;C:\Program Files\CMake\bin;C:\Program Files\Ninja;%PATH%
+
+            REM Add MSVC to path if available
+            if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" (
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+            ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" (
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+            )
+
             cmake --preset windows-clang-cl -DCMAKE_MAKE_PROGRAM=ninja
+            if errorlevel 1 exit /b 1
 
-      - run:
-          name: Build project
-          shell: cmd.exe
-          command: |
-            call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
             cmake --build build --config Debug
+            if errorlevel 1 exit /b 1
 
       - run:
-          name: Run tests with SQL disabled
+          name: Run tests
           shell: cmd.exe
           command: |
+            setlocal enabledelayedexpansion
             set PATH=C:\vcpkg\installed\x64-windows\bin;%PATH%
-            for /f "delims=" %%x in ('dir /s /b build\tests\libasyik_test.exe') do (
+
+            REM Find and run test executable
+            for /f "delims=" %%x in ('dir /s /b build\*\libasyik_test.exe') do (
+              echo Running tests from: %%x
               %%x ~[sql] --reporter compact
               exit /b !ERRORLEVEL!
             )
+
+            echo Test executable not found
             exit /b 1
 
       - save_cache:
-          key: vcpkg-cache-{{ checksum "vcpkg.json" }}
+          key: vcpkg-cache-windows-{{ checksum "vcpkg.json" }}
           paths:
             - C:\vcpkg\installed
 

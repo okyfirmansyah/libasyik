@@ -1,0 +1,37 @@
+# Use Windows Server 2022 base image
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Install Chocolatey
+RUN powershell -NoProfile -InputFormat None -Command \
+    "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" && \
+    SETX PATH "%PATH%;C:\ProgramData\chocolatey\bin"
+
+# Install build tools
+RUN choco install -y cmake ninja llvm visualstudio2022buildtools --package-parameters "visualstudio2022buildtools --add Microsoft.VisualStudio.Workload.VCTools"
+
+# Set up environment variables
+ENV VCPKG_ROOT=C:\vcpkg
+ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+ENV X_VCPKG_ASSET_SOURCES=clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}
+
+# Set working directory
+WORKDIR /src
+
+# Copy project
+COPY . .
+
+# Initialize submodules and build
+RUN git submodule update --init --recursive
+
+RUN cmd /C "\
+    call \"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat\" x64 && \
+    cmake --preset windows-clang-cl -DCMAKE_MAKE_PROGRAM=ninja && \
+    cmake --build build --config Debug"
+
+# Run tests
+CMD cmd /C "\
+    set PATH=C:\vcpkg\installed\x64-windows\bin;%PATH% && \
+    for /f \"delims=\" %%x in ('dir /s /b build\tests\libasyik_test.exe') do ( \
+      %%x ~[sql] --reporter compact \
+    )"
