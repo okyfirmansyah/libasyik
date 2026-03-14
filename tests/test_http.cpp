@@ -837,6 +837,7 @@ TEST_CASE("test manual handling of http requests", "[http]")
   as->run();
 }
 
+#ifndef _WIN32
 TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
 {
   std::atomic<bool> stopped;
@@ -923,6 +924,7 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
   LOG(INFO) << "testing multithread http server done\n";
   asyik::sleep_for(std::chrono::milliseconds(500));
 }
+#endif  // !_WIN32
 
 TEST_CASE("Test for multipart", "[http]")
 {

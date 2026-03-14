@@ -1,6 +1,11 @@
 #ifndef DIGESTAUTH_H
 #define DIGESTAUTH_H
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+
 #include <openssl/md5.h>
 
 #include <boost/algorithm/string.hpp>
@@ -238,5 +243,9 @@ class digest_authenticator {
 };
 
 }  // namespace asyik
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #endif  // DIGESTAUTHENTICATOR_H

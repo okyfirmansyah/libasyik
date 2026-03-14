@@ -201,7 +201,7 @@ class fiber_promise_executor {
     return boost::asio::query(system_executor(), execution::context);
   }
 
-  static BOOST_ASIO_CONSTEXPR Blocking query(execution::blocking_t)
+  static constexpr Blocking query(execution::blocking_t)
   {
     return Blocking();
   }
@@ -221,14 +221,8 @@ class fiber_promise_executor {
   template <typename F>
   void execute(BOOST_ASIO_MOVE_ARG(F) f) const
   {
-#if defined(BOOST_ASIO_NO_DEPRECATED)
     boost::asio::require(system_executor(), Blocking())
         .execute(fiber_promise_invoker<T, F>(p_, BOOST_ASIO_MOVE_CAST(F)(f)));
-#else   // defined(BOOST_ASIO_NO_DEPRECATED)
-    execution::execute(
-        boost::asio::require(system_executor(), Blocking()),
-        fiber_promise_invoker<T, F>(p_, BOOST_ASIO_MOVE_CAST(F)(f)));
-#endif  // defined(BOOST_ASIO_NO_DEPRECATED)
   }
 
 #if !defined(BOOST_ASIO_NO_TS_EXECUTORS)
@@ -916,7 +910,7 @@ struct query_static_constexpr_member<
   BOOST_ASIO_STATIC_CONSTEXPR(bool, is_noexcept = true);
   typedef Blocking result_type;
 
-  static BOOST_ASIO_CONSTEXPR result_type value() BOOST_ASIO_NOEXCEPT
+  static constexpr result_type value() BOOST_ASIO_NOEXCEPT
   {
     return Blocking();
   }

@@ -2,7 +2,9 @@
 
 #include <libpq-fe.h>
 
+#ifndef _WIN32
 #include <boost/asio/posix/stream_descriptor.hpp>
+#endif
 #include <memory>
 
 #include "aixlog.hpp"
@@ -78,11 +80,22 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
     int sock = PQsocket(conn);
     if (sock < 0) return;
 
-    // create stream_descriptor if not present (C++11 compatible)
+#ifdef _WIN32
+    // On Windows, PQsocket() returns a Winsock SOCKET.
+    // Assign it to a tcp::socket for async_wait (do NOT let asio close it).
+    if (!notify_socket) {
+      notify_socket.reset(
+          new boost::asio::ip::tcp::socket(service->get_io_service()));
+      notify_socket->assign(boost::asio::ip::tcp::v4(),
+                            static_cast<boost::asio::ip::tcp::socket::native_handle_type>(sock));
+    }
+#else
+    // On Linux/POSIX, wrap the fd in a posix::stream_descriptor.
     if (!notify_stream) {
       notify_stream.reset(
           new asio::posix::stream_descriptor(service->get_io_service(), sock));
     }
+#endif
 
     if (notify_running) return;
     notify_running = true;
@@ -145,12 +158,19 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
         }
       }
 
-      // re-arm async wait using the live session
+      // re-arm async wait
       try {
+#ifdef _WIN32
+        if (self->notify_socket && self->notify_running) {
+          self->notify_socket->async_wait(
+              boost::asio::ip::tcp::socket::wait_read, *handler_ptr);
+        }
+#else
         if (self->notify_stream && self->notify_running) {
           self->notify_stream->async_wait(
               asio::posix::stream_descriptor::wait_read, *handler_ptr);
         }
+#endif
       } catch (...) {
         std::lock_guard<fibers::mutex> l(self->notify_mtx);
         self->notify_running = false;
@@ -158,8 +178,13 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
     };
 
     // start first wait
+#ifdef _WIN32
+    notify_socket->async_wait(boost::asio::ip::tcp::socket::wait_read,
+                              *handler_ptr);
+#else
     notify_stream->async_wait(asio::posix::stream_descriptor::wait_read,
                               *handler_ptr);
+#endif
   } catch (...) {
   }
 }
@@ -206,11 +231,21 @@ void sql_session::unlisten_all()
 
   // cancel and clear descriptor
   try {
+#ifdef _WIN32
+    if (notify_socket) {
+      boost::system::error_code ec;
+      notify_socket->cancel(ec);
+      // release() so asio does NOT close the socket — libpq owns it
+      notify_socket->release(ec);
+      notify_socket.reset();
+    }
+#else
     if (notify_stream) {
       boost::system::error_code ec;
       notify_stream->cancel(ec);
       notify_stream.reset();
     }
+#endif
   } catch (...) {
   }
   std::lock_guard<fibers::mutex> l(notify_mtx);

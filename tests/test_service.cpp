@@ -4,6 +4,15 @@
 #include "libasyik/http.hpp"
 #include "libasyik/service.hpp"
 
+#ifdef _WIN32
+#include <chrono>
+#include <thread>
+inline void usleep(unsigned int us)
+{
+  std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+#endif
+
 namespace asyik {
 void _TEST_invoke_service(){};
 

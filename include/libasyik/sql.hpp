@@ -181,8 +181,14 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
   // notification handlers registered via `listen`.
   fibers::mutex notify_mtx;
   std::unordered_map<std::string, notify_handler_t> notify_handlers;
-  // Asio stream descriptor used to watch libpq socket (created when needed).
+  // Asio descriptor used to watch libpq socket for LISTEN/NOTIFY.
+  // On Linux: posix::stream_descriptor wrapping PQsocket() fd.
+  // On Windows: tcp::socket assigned the Winsock SOCKET from PQsocket().
+#ifdef _WIN32
+  std::unique_ptr<boost::asio::ip::tcp::socket> notify_socket;
+#else
   std::unique_ptr<asio::posix::stream_descriptor> notify_stream;
+#endif
   bool notify_running = false;
 
   friend class sql_pool;

@@ -123,8 +123,8 @@ class websocket_impl : public websocket {
   virtual size_t read_basic_buffer(std::vector<uint8_t>& b)
   {
     // auto buffer = asio::dynamic_buffer(b);
-    asio::mutable_buffers_1 mb(b.data(), b.size());
-    auto buffer = beast::buffers_adaptor<asio::mutable_buffers_1>(mb);
+    asio::mutable_buffer mb(b.data(), b.size());
+    auto buffer = beast::buffers_adaptor<asio::mutable_buffer>(mb);
 
     // we need to call async ops thru strand for this op
     // to be MT-safe

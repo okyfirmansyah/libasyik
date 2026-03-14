@@ -1,17 +1,29 @@
 // Enable strptime and timegm on Linux/glibc.
+#ifndef _WIN32
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #endif
 
 #include "libasyik/http_static.hpp"
 
 // Full http_request definition (http_static.hpp only has the forward decl
 // via http_types.hpp → asyik_fwd.hpp)
+
+#ifdef _WIN32
+#include <io.h>
+#include <direct.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdlib.h>  // _fullpath
+#else
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <cstring>
@@ -24,6 +36,74 @@
 #include "aixlog.hpp"
 #include "libasyik/error.hpp"
 #include "libasyik/http_client.hpp"
+
+// ---------------------------------------------------------------------------
+// Windows portability shims
+// ---------------------------------------------------------------------------
+#ifdef _WIN32
+using asyik_off_t  = int64_t;
+using asyik_ssize_t = intptr_t;
+
+#ifndef PATH_MAX
+#define PATH_MAX _MAX_PATH
+#endif
+
+static int asyik_open(const char* path, int flags) {
+  return _open(path, flags | _O_BINARY);
+}
+static int asyik_close(int fd) { return _close(fd); }
+static asyik_ssize_t asyik_read(int fd, void* buf, size_t count) {
+  return _read(fd, buf, static_cast<unsigned int>(count));
+}
+static asyik_off_t asyik_lseek(int fd, asyik_off_t offset, int whence) {
+  return _lseeki64(fd, offset, whence);
+}
+
+using asyik_stat_t = struct _stat64;
+static int asyik_stat(const char* path, asyik_stat_t* buf) {
+  return _stat64(path, buf);
+}
+
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+#ifndef S_ISREG
+#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+#endif
+
+static char* asyik_realpath(const char* path, char* resolved) {
+  char* result = _fullpath(resolved, path, PATH_MAX);
+  if (result) {
+    for (char* p = result; *p; ++p)
+      if (*p == '\\') *p = '/';
+  }
+  return result;
+}
+
+#else  // POSIX
+
+using asyik_off_t  = off_t;
+using asyik_ssize_t = ssize_t;
+
+static int asyik_open(const char* path, int flags) { return open(path, flags); }
+static int asyik_close(int fd) { return close(fd); }
+static asyik_ssize_t asyik_read(int fd, void* buf, size_t count) {
+  return read(fd, buf, count);
+}
+static asyik_off_t asyik_lseek(int fd, asyik_off_t offset, int whence) {
+  return lseek(fd, offset, whence);
+}
+
+using asyik_stat_t = struct stat;
+static int asyik_stat(const char* path, asyik_stat_t* buf) {
+  return stat(path, buf);
+}
+
+static char* asyik_realpath(const char* path, char* resolved) {
+  return realpath(path, resolved);
+}
+
+#endif  // _WIN32
 
 namespace asyik {
 namespace internal {
@@ -88,7 +168,11 @@ std::string make_etag(long long mtime, long long size)
 static std::string format_http_date(time_t t)
 {
   struct tm tm_buf;
+#ifdef _WIN32
+  gmtime_s(&tm_buf, &t);
+#else
   gmtime_r(&t, &tm_buf);
+#endif
   char buf[64];
   strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm_buf);
   return std::string(buf);
@@ -97,6 +181,20 @@ static std::string format_http_date(time_t t)
 static time_t parse_http_date(const std::string& s)
 {
   struct tm t = {};
+#ifdef _WIN32
+  auto try_parse = [&](const char* fmt) -> bool {
+    std::istringstream iss(s);
+    iss.imbue(std::locale::classic());
+    iss >> std::get_time(&t, fmt);
+    return !iss.fail();
+  };
+  if (try_parse("%a, %d %b %Y %H:%M:%S GMT")) return _mkgmtime(&t);
+  t = {};
+  if (try_parse("%A, %d-%b-%y %H:%M:%S GMT")) return _mkgmtime(&t);
+  t = {};
+  if (try_parse("%a %b %d %H:%M:%S %Y")) return _mkgmtime(&t);
+  return static_cast<time_t>(-1);
+#else
   // RFC 7231 preferred: "Sun, 06 Nov 1994 08:49:37 GMT"
   if (strptime(s.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &t)) return timegm(&t);
   // RFC 850: "Sunday, 06-Nov-94 08:49:37 GMT"
@@ -104,6 +202,7 @@ static time_t parse_http_date(const std::string& s)
   // ANSI C: "Sun Nov  6 08:49:37 1994"
   if (strptime(s.c_str(), "%a %b %e %H:%M:%S %Y", &t)) return timegm(&t);
   return static_cast<time_t>(-1);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -133,12 +232,12 @@ static std::string percent_decode(const std::string& encoded)
 // ---------------------------------------------------------------------------
 
 /// Read [offset, offset+length) bytes from fd into buf.
-static bool read_range(int fd, char* buf, off_t offset, size_t length)
+static bool read_range(int fd, char* buf, asyik_off_t offset, size_t length)
 {
-  if (lseek(fd, offset, SEEK_SET) == static_cast<off_t>(-1)) return false;
+  if (asyik_lseek(fd, offset, SEEK_SET) == static_cast<asyik_off_t>(-1)) return false;
   size_t remaining = length;
   while (remaining > 0) {
-    ssize_t n = read(fd, buf + (length - remaining), remaining);
+    asyik_ssize_t n = asyik_read(fd, buf + (length - remaining), remaining);
     if (n <= 0) return false;
     remaining -= static_cast<size_t>(n);
   }
@@ -155,7 +254,7 @@ http_route_callback make_static_file_handler(std::string url_prefix,
 {
   // Canonicalise root_dir at registration time so we fail fast on bad config.
   char canon_buf[PATH_MAX];
-  if (!realpath(root_dir.c_str(), canon_buf)) {
+  if (!asyik_realpath(root_dir.c_str(), canon_buf)) {
     LOG(ERROR) << "serve_static: cannot resolve root_dir '" << root_dir
                << "': " << strerror(errno) << "\n";
     return [](http_request_ptr req, const http_route_args&) {
@@ -208,7 +307,7 @@ http_route_callback make_static_file_handler(std::string url_prefix,
     char resolved_buf[PATH_MAX];
     std::string real_path;
 
-    if (realpath(full_path.c_str(), resolved_buf)) {
+    if (asyik_realpath(full_path.c_str(), resolved_buf)) {
       real_path = resolved_buf;
     } else {
       req->response.result(404);
@@ -229,8 +328,8 @@ http_route_callback make_static_file_handler(std::string url_prefix,
     }
 
     // ─── ④ stat() ─────────────────────────────────────────────────────────
-    struct stat st;
-    if (stat(real_path.c_str(), &st) != 0) {
+    asyik_stat_t st;
+    if (asyik_stat(real_path.c_str(), &st) != 0) {
       req->response.result(404);
       req->response.body = "Not Found";
       return;
@@ -242,7 +341,7 @@ http_route_callback make_static_file_handler(std::string url_prefix,
       real_path += cfg.index_file;
 
       char resolved2[PATH_MAX];
-      if (!realpath(real_path.c_str(), resolved2)) {
+      if (!asyik_realpath(real_path.c_str(), resolved2)) {
         req->response.result(404);
         req->response.body = "Not Found";
         return;
@@ -256,7 +355,7 @@ http_route_callback make_static_file_handler(std::string url_prefix,
         return;
       }
 
-      if (stat(real_path.c_str(), &st) != 0) {
+      if (asyik_stat(real_path.c_str(), &st) != 0) {
         req->response.result(404);
         req->response.body = "Not Found";
         return;
@@ -349,15 +448,15 @@ http_route_callback make_static_file_handler(std::string url_prefix,
             long long range_len = range_end - range_start + 1;
             std::string body(static_cast<size_t>(range_len), '\0');
 
-            int fd = open(real_path.c_str(), O_RDONLY);
+            int fd = asyik_open(real_path.c_str(), O_RDONLY);
             if (fd < 0) {
               req->response.result(500);
               req->response.body = "Internal Server Error";
               return;
             }
-            bool ok = read_range(fd, &body[0], static_cast<off_t>(range_start),
+            bool ok = read_range(fd, &body[0], static_cast<asyik_off_t>(range_start),
                                  static_cast<size_t>(range_len));
-            close(fd);
+            asyik_close(fd);
 
             if (!ok) {
               req->response.result(500);
@@ -387,14 +486,14 @@ http_route_callback make_static_file_handler(std::string url_prefix,
     std::string body;
     if (fsize > 0) {
       body.resize(static_cast<size_t>(fsize));
-      int fd = open(real_path.c_str(), O_RDONLY);
+      int fd = asyik_open(real_path.c_str(), O_RDONLY);
       if (fd < 0) {
         req->response.result(500);
         req->response.body = "Internal Server Error";
         return;
       }
       bool ok = read_range(fd, &body[0], 0, static_cast<size_t>(fsize));
-      close(fd);
+      asyik_close(fd);
 
       if (!ok) {
         req->response.result(500);

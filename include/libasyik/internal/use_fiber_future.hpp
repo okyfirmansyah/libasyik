@@ -59,7 +59,7 @@ class use_fiber_future_t {
   typedef Allocator allocator_type;
 
   /// Construct using default-constructed allocator.
-  BOOST_ASIO_CONSTEXPR use_fiber_future_t() {}
+  constexpr use_fiber_future_t() {}
 
   /// Construct using specified allocator.
   explicit use_fiber_future_t(const Allocator& allocator)
@@ -113,7 +113,7 @@ class use_fiber_future_t {
   // Helper type to ensure that use_fiber_future can be constexpr
   // default-constructed even when std::allocator<void> can't be.
   struct std_allocator_void {
-    BOOST_ASIO_CONSTEXPR std_allocator_void() {}
+    constexpr std_allocator_void() {}
 
     operator std::allocator<void>() const { return std::allocator<void>(); }
   };
@@ -128,9 +128,9 @@ class use_fiber_future_t {
  * See the documentation for boost::asio::use_fiber_future_t for a usage
  * example.
  */
-#if defined(BOOST_ASIO_HAS_CONSTEXPR)
+#if defined(BOOST_ASIO_HAS_CONSTEXPR) && !defined(_MSC_VER)
 constexpr use_fiber_future_t<> use_fiber_future;
-#elif defined(BOOST_ASIO_MSVC)
+#elif defined(BOOST_ASIO_MSVC) || defined(_MSC_VER)
 __declspec(selectany) use_fiber_future_t<> use_fiber_future;
 #endif
 
@@ -142,8 +142,8 @@ __declspec(selectany) use_fiber_future_t<> use_fiber_future;
 #include "detail/use_fiber_future_impl.hpp"
 
 namespace asyik {
-constexpr boost::asio::use_fiber_future_t<> use_fiber_future;
-constexpr boost::asio::use_future_t<> use_future;
+inline const boost::asio::use_fiber_future_t<> use_fiber_future{};
+inline const boost::asio::use_future_t<> use_future{};
 }  // namespace asyik
 
 #endif  // ASYIK_USE_FIBER_FUTURE_HPP

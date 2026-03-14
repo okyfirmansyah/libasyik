@@ -1,0 +1,29 @@
+{
+  "name": "libasyik",
+  "version": "1.6.0",
+  "dependencies": [
+    "boost-asio",
+    "boost-beast",
+    "boost-fiber",
+    "boost-context",
+    "boost-atomic",
+    "boost-date-time",
+    "boost-url",
+    "boost-algorithm",
+    "boost-regex",
+    "boost-any",
+    "boost-optional",
+    "boost-convert",
+    "boost-system",
+    "openssl",
+    {
+      "name": "soci",
+      "features": [
+        "postgresql",
+        "sqlite3"
+      ]
+    },
+    "libpq",
+    "sqlite3"
+  ]
+}

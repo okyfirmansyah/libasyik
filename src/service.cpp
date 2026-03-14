@@ -96,8 +96,6 @@ void service::run(bool stop_on_complete)
     }
   });
 
-  std::shared_ptr<boost::asio::io_service::work> work;
-
   // in-thread io_service loop
   // Use adaptive sleep to avoid busy-polling and excessive clock_gettime
   // syscalls, which are especially expensive on VPS/cloud environments where

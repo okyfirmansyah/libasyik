@@ -1,10 +1,17 @@
 // Static file serving tests – uses ports 4100, 4101, 4102.
 
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -29,16 +36,34 @@ std::string write_file(const std::string& dir, const std::string& name,
   return path;
 }
 
-/// Recursively remove a directory tree (uses POSIX shell for simplicity).
-void rmrf(const std::string& path) { ::system(("rm -rf " + path).c_str()); }
+/// Recursively remove a directory tree.
+void rmrf(const std::string& path) {
+  std::error_code ec;
+  std::filesystem::remove_all(path, ec);
+}
 
-/// Create a mkdtemp-style temp directory and return its path.
-std::string make_temp_dir(const char* tmpl = "/tmp/asyik_static_XXXXXX")
+/// Create a temporary directory and return its path (forward slashes).
+std::string make_temp_dir(const char* /*tmpl*/ = nullptr)
 {
-  std::string t(tmpl);
-  char* p = ::mkdtemp(&t[0]);
-  REQUIRE(p != nullptr);
-  return t;
+  auto tmp = std::filesystem::temp_directory_path();
+  std::string name = "asyik_static_" + std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  auto dir = tmp / name;
+  std::filesystem::create_directories(dir);
+  std::string result = dir.string();
+  // Normalize to forward slashes for consistency with libasyik path handling.
+  for (auto& c : result)
+    if (c == '\\') c = '/';
+  return result;
+}
+
+/// Portable mkdir.
+void portable_mkdir(const std::string& path) {
+#ifdef _WIN32
+  _mkdir(path.c_str());
+#else
+  ::mkdir(path.c_str(), 0755);
+#endif
 }
 
 }  // anonymous namespace
@@ -120,7 +145,7 @@ TEST_CASE("serve_static: basic GET and MIME types", "[static_file][http]")
   write_file(root, "image.png", "\x89PNG\r\n\x1a\n");
 
   // Sub-directory
-  ::mkdir((root + "/sub").c_str(), 0755);
+  portable_mkdir(root + "/sub");
   write_file(root + "/sub", "page.html", "<html>Sub</html>");
 
   auto as = asyik::make_service();
@@ -313,6 +338,7 @@ TEST_CASE("serve_static: Range requests (206 Partial Content)",
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+#ifndef _WIN32
 TEST_CASE("serve_static: path traversal is blocked", "[static_file][http]")
 {
   std::string root = make_temp_dir();
@@ -353,3 +379,4 @@ TEST_CASE("serve_static: path traversal is blocked", "[static_file][http]")
   rmrf(root);
   rmrf(outside);
 }
+#endif  // !_WIN32

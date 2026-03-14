@@ -1,0 +1,68 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 14,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-clang-cl",
+      "displayName": "Windows Clang-CL (vcpkg)",
+      "description": "Build on Windows with clang-cl (MSVC ABI) and vcpkg dependencies",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_LINKER": "lld-link",
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "LIBASYIK_ENABLE_SSL_SERVER": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-default",
+      "displayName": "Linux Default",
+      "description": "Build on Linux with system-installed dependencies",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-clang-cl-debug",
+      "displayName": "Windows Clang-CL Debug",
+      "configurePreset": "windows-clang-cl"
+    },
+    {
+      "name": "windows-clang-cl-release",
+      "displayName": "Windows Clang-CL Release",
+      "configurePreset": "windows-clang-cl",
+      "nativeToolOptions": [
+        "-j"
+      ]
+    },
+    {
+      "name": "linux-default",
+      "displayName": "Linux Debug",
+      "configurePreset": "linux-default"
+    }
+  ]
+}
