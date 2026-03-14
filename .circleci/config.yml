@@ -39,15 +39,15 @@ jobs:
           command: |
             # Download and install CMake
             Write-Host "Installing CMake..."
-            choco install -y cmake --version=3.27.0
+            choco install -y cmake
 
             # Download and install Ninja
             Write-Host "Installing Ninja..."
             choco install -y ninja
 
-            # Download and install LLVM with clang-cl
+            # Download and install LLVM with clang-cl (latest available)
             Write-Host "Installing LLVM..."
-            choco install -y llvm --version=17.0.0
+            choco install -y llvm
 
       - restore_cache:
           keys:
