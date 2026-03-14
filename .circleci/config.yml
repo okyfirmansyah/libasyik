@@ -24,27 +24,26 @@ jobs:
   build-windows:
     executor:
       name: windows/default
-      size: medium
+      size: large
+    environment:
+      VCPKG_ROOT: C:\vcpkg
+      VCPKG_FORCE_SYSTEM_BINARIES: "1"
+      X_VCPKG_ASSET_SOURCES: "clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}"
     steps:
       - checkout
 
       - run:
-          name: Install build tools (CMake, Ninja, LLVM)
+          name: Install build tools
           shell: powershell.exe
+          timeout: 3600
           command: |
+            # Install Visual Studio Build Tools with C++ workload if not present
+            if (-not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat")) {
+              Write-Host "Installing Visual Studio Build Tools..."
+              choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
+            }
+            # Install other tools
             choco install -y cmake ninja llvm
-
-      - run:
-          name: Setup build environment
-          shell: cmd.exe
-          command: |
-            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-            set VCPKG_ROOT=C:\vcpkg
-            set VCPKG_FORCE_SYSTEM_BINARIES=1
-            set X_VCPKG_ASSET_SOURCES=clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}
-            set PATH=C:\Program Files\LLVM\bin;%PATH%
-            set PATH=C:\Program Files\CMake\bin;%PATH%
-            echo %PATH%
 
       - restore_cache:
           keys:
@@ -54,21 +53,14 @@ jobs:
           name: Configure with CMake
           shell: cmd.exe
           command: |
-            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-            set VCPKG_ROOT=C:\vcpkg
-            set VCPKG_FORCE_SYSTEM_BINARIES=1
-            set X_VCPKG_ASSET_SOURCES=clear;x-script,curl --ssl-no-revoke -L {url} --output {dst}
-            set PATH=C:\Program Files\LLVM\bin;%PATH%
-            set PATH=C:\Program Files\CMake\bin;%PATH%
+            call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
             cmake --preset windows-clang-cl -DCMAKE_MAKE_PROGRAM=ninja
 
       - run:
           name: Build project
           shell: cmd.exe
           command: |
-            call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-            set PATH=C:\Program Files\LLVM\bin;%PATH%
-            set PATH=C:\Program Files\CMake\bin;%PATH%
+            call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
             cmake --build build --config Debug
 
       - run:
