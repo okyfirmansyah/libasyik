@@ -30,6 +30,12 @@ void main()
   }
 ```
 
+> **Note on `args` indexing:** `args` is a `std::vector<std::string>` populated
+> from the regex match. `args[0]` contains the **full regex match** (the entire
+> matched URL path), while `args[1]`, `args[2]`, etc. contain the captured
+> groups corresponding to `<int>`, `<string>`, or `<path>` tags. Always start
+> reading parameters from `args[1]`.
+
 #### Set and Get HTTP Payload and Headers
 ```c++
 void main()
@@ -195,6 +201,60 @@ void main()
 
 #### Create SSL Server
 To create HTTPS server, use the same templates but now using **make_https_server()**, for e.g:
+
+#### Route Registration: Tags vs Raw Regex
+
+`on_http_request(route_spec, ...)` uses **route tags** (`<int>`, `<string>`,
+`<path>`). All regex special characters in the route spec are escaped
+automatically before tags are substituted. This means passing a raw regex
+like `/api/(\d+)/file` will **silently fail** — the parentheses and backslash
+are escaped, and the route will never match.
+
+For raw regex patterns, use `on_http_request_regex()` directly:
+
+```c++
+// WRONG — parens and \d are escaped, route never matches:
+server->on_http_request("/api/(\\d+)/file", "GET", handler);
+
+// CORRECT — use on_http_request_regex:
+server->on_http_request_regex(
+    std::regex("^/api/(\\d+)/file$"), "GET", handler);
+
+// CORRECT — use route tags:
+server->on_http_request("/api/<int>/file", "GET", handler);
+```
+
+A warning is logged when `route_spec_to_regex()` detects raw regex characters
+in the spec string, to help catch this mistake early.
+
+#### Route Ordering and Priority
+
+Routes are matched in **registration order** — the first route whose pattern
+matches the request wins. This is important when using `serve_static()` with
+a catch-all prefix like `"/"`.
+
+All registration methods (`on_http_request`, `on_http_request_regex`,
+`on_websocket`, `on_websocket_regex`) accept an optional `insert_front`
+parameter (default `false`). When `true`, the route is inserted at the
+beginning of the route list instead of appended:
+
+```c++
+auto server = asyik::make_http_server(as, "127.0.0.1", 4004);
+
+// This catch-all is registered first
+server->serve_static("/", "/var/www/html");
+
+// But this route is inserted at the front, so it matches before serve_static
+server->on_http_request("/api/<string>", "GET", [](auto req, auto args) {
+    req->response.body = "api: " + args[1];
+    req->response.result(200);
+}, /*insert_front=*/true);
+```
+
+**Best practice:** Register specific API routes first, then call
+`serve_static()` last so it only handles requests that no explicit route
+matched.
+
 ```c++
 #include "libasyik/service.hpp"
 #include "libasyik/http.hpp"

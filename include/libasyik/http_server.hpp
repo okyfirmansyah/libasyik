@@ -9,6 +9,7 @@
 #include <boost/beast/ssl.hpp>
 #include <regex>
 #include <string>
+#include <type_traits>
 
 #include "asyik_fwd.hpp"
 #include "boost/asio.hpp"
@@ -63,38 +64,55 @@ class http_server
   http_server(struct private_&&, service_ptr as, string_view addr,
               uint16_t port);
 
-  template <typename T>
-  void on_http_request(string_view route_spec, T&& cb)
+  template <typename T,
+            std::enable_if_t<!std::is_convertible_v<std::decay_t<T>, string_view>,
+                             int> = 0>
+  void on_http_request(string_view route_spec, T&& cb,
+                       bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_http_request_regex(re, "", std::forward<T>(cb));
+    on_http_request_regex(re, "", std::forward<T>(cb), insert_front);
   }
 
   template <typename T>
-  void on_http_request(string_view route_spec, string_view method, T&& cb)
+  void on_http_request(string_view route_spec, string_view method, T&& cb,
+                       bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_http_request_regex(re, method, std::forward<T>(cb));
+    on_http_request_regex(re, method, std::forward<T>(cb), insert_front);
   }
 
   template <typename R, typename M, typename T>
-  void on_http_request_regex(R&& r, M&& m, T&& cb)
+  void on_http_request_regex(R&& r, M&& m, T&& cb,
+                             bool insert_front = false)
   {
-    http_routes.push_back({std::string{std::forward<M>(m)}, std::forward<R>(r),
-                           std::forward<T>(cb)});
+    auto route = http_route_tuple{std::string{std::forward<M>(m)},
+                                  std::forward<R>(r), std::forward<T>(cb)};
+    if (insert_front)
+      http_routes.insert(http_routes.begin(), std::move(route));
+    else
+      http_routes.push_back(std::move(route));
   }
 
-  template <typename T>
-  void on_websocket(string_view route_spec, T&& cb)
+  template <typename T,
+            std::enable_if_t<!std::is_convertible_v<std::decay_t<T>, string_view>,
+                             int> = 0>
+  void on_websocket(string_view route_spec, T&& cb,
+                    bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_websocket_regex(re, std::forward<T>(cb));
+    on_websocket_regex(re, std::forward<T>(cb), insert_front);
   }
 
   template <typename R, typename T>
-  void on_websocket_regex(R&& r, T&& cb)
+  void on_websocket_regex(R&& r, T&& cb, bool insert_front = false)
   {
-    ws_routes.push_back({"", std::forward<R>(r), std::forward<T>(cb)});
+    auto route = websocket_route_tuple{"", std::forward<R>(r),
+                                       std::forward<T>(cb)};
+    if (insert_front)
+      ws_routes.insert(ws_routes.begin(), std::move(route));
+    else
+      ws_routes.push_back(std::move(route));
   }
   /// Serve static files from @p root_dir under the URL prefix @p url_prefix.
   ///

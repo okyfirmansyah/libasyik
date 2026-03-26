@@ -167,6 +167,34 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
         .get();
   };
 
+  /// Execute a query and return a rowset for multi-row iteration.
+  ///
+  /// Unlike query(), which works best for INSERT/UPDATE or single-row SELECT
+  /// with soci::into(), query_rows() returns a soci::rowset<soci::row> that
+  /// can be iterated with a range-for loop.
+  ///
+  /// Example:
+  ///   auto rs = ses->query_rows("SELECT id, name FROM persons");
+  ///   for (const auto& r : rs) {
+  ///       int id = r.get<int>(0);
+  ///       std::string name = r.get<std::string>(1);
+  ///   }
+  ///
+  /// With bind parameters:
+  ///   auto rs = ses->query_rows("SELECT * FROM persons WHERE id > :min",
+  ///                             soci::use(min_id));
+  template <typename... Args>
+  soci::rowset<soci::row> query_rows(string_view s, Args&&... args)
+  {
+    return service
+        ->async([&args..., s, ses = soci_session.get()]() {
+          soci::rowset<soci::row> rs =
+              ((ses->prepare << s), ..., std::forward<Args>(args));
+          return rs;
+        })
+        .get();
+  };
+
   void begin();
   void commit();
   void rollback();

@@ -80,9 +80,66 @@ TEST_CASE("Test case to connect to the test DB")
 
 TEST_CASE("Test rowset, prepared, execute and fetch")
 {
-  // prepare
-  // rowset<row> r;
-  // sql << "select * from persons", into(r);
+  using namespace soci;
+  auto as = asyik::make_service();
+
+  auto pool = make_sql_pool(
+      asyik::sql_backend_postgresql,
+      "host=localhost dbname=postgres password=test user=postgres", 4);
+
+  auto ses = pool->get_session(as);
+
+  ses->query(R"(CREATE TABLE IF NOT EXISTS persons (id int,
+                                                   name varchar(255));)");
+  ses->query("delete from persons");
+  ses->query("insert into persons(id, name) values(1, 'Alice')");
+  ses->query("insert into persons(id, name) values(2, 'Bob')");
+  ses->query("insert into persons(id, name) values(3, 'Charlie')");
+
+  // query_rows without bind params
+  {
+    auto rs = ses->query_rows("select id, name from persons order by id");
+    std::vector<std::pair<int, std::string>> results;
+    for (const auto& r : rs) {
+      results.emplace_back(r.get<int>(0), r.get<std::string>(1));
+    }
+    REQUIRE(results.size() == 3);
+    REQUIRE(results[0].first == 1);
+    REQUIRE(results[0].second == "Alice");
+    REQUIRE(results[1].first == 2);
+    REQUIRE(results[1].second == "Bob");
+    REQUIRE(results[2].first == 3);
+    REQUIRE(results[2].second == "Charlie");
+  }
+
+  // query_rows with bind params
+  {
+    int min_id = 1;
+    auto rs = ses->query_rows(
+        "select id, name from persons where id > :min order by id",
+        soci::use(min_id));
+    std::vector<std::pair<int, std::string>> results;
+    for (const auto& r : rs) {
+      results.emplace_back(r.get<int>(0), r.get<std::string>(1));
+    }
+    REQUIRE(results.size() == 2);
+    REQUIRE(results[0].first == 2);
+    REQUIRE(results[1].first == 3);
+  }
+
+  // query_rows returning empty result
+  {
+    auto rs = ses->query_rows("select id, name from persons where id > 999");
+    int count = 0;
+    for (const auto& r : rs) {
+      (void)r;
+      count++;
+    }
+    REQUIRE(count == 0);
+  }
+
+  ses->query("delete from persons");
+  as->stop();
 }
 
 TEST_CASE("Test transactions")

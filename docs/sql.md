@@ -50,6 +50,41 @@ void some_handler(asyik::service_ptr as)
 }
 ```
 
+#### Multi-row Queries with query_rows()
+
+The `query()` method works well for INSERT/UPDATE or single-row SELECT with
+`soci::into()`. For queries that return multiple rows, use `query_rows()`
+which returns a `soci::rowset<soci::row>` that can be iterated:
+
+```c++
+void some_handler(asyik::service_ptr as)
+{
+    auto pool = make_sql_pool(asyik::sql_backend_postgresql,
+                              "host=localhost dbname=postgres password=test user=postgres", 4);
+    auto ses = pool->get_session(as);
+
+    // iterate all rows
+    auto rs = ses->query_rows("SELECT id, name FROM persons");
+    for (const auto& r : rs) {
+        int id = r.get<int>(0);
+        std::string name = r.get<std::string>(1);
+        LOG(INFO) << "id=" << id << " name=" << name << "\n";
+    }
+
+    // with bind parameters
+    int min_id = 10;
+    auto rs2 = ses->query_rows("SELECT id, name FROM persons WHERE id > :min",
+                               soci::use(min_id));
+    for (const auto& r : rs2) {
+        // process rows...
+    }
+}
+```
+
+> **SQLite integer caveat:** SOCI's SQLite backend stores all integers as
+> `int` internally. Calling `r.get<long long>(col)` on a `soci::row` will
+> throw `std::bad_cast`. Use `static_cast<int64_t>(r.get<int>(col))` instead.
+
 #### Using Transactions
 ```c++
 void some_handler(asyik::service_ptr as, int id, int id2)
