@@ -10,6 +10,19 @@ std::string route_spec_to_regex(string_view route_spc)
 {
   std::string regex_spec{route_spc};
 
+  // Warn if the spec appears to contain raw regex metacharacters.
+  // Users who need raw regex should use on_http_request_regex() instead.
+  {
+    static const std::regex raw_regex_hint{
+        R"(\(|\)|\\[dDwWsS]|\[.+\]|\\.\*|\\.\+)"};
+    if (std::regex_search(regex_spec, raw_regex_hint)) {
+      LOG(WARNING)
+          << "route_spec '" << regex_spec
+          << "' appears to contain raw regex characters which will be "
+             "escaped. Use on_http_request_regex() for raw regex patterns.\n";
+    }
+  }
+
   // step 1: trim trailing .
   if (regex_spec[regex_spec.length() - 1] == '/')
     regex_spec = regex_spec.substr(0, regex_spec.length() - 1);

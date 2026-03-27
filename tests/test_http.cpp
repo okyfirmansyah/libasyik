@@ -1811,4 +1811,43 @@ TEST_CASE("Test http url view", "[http_url_view]")
   as->run(true);
 }
 
+TEST_CASE("check route insert_front ordering")
+{
+  auto as = asyik::make_service();
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4006);
+
+  // Register a catch-all route first
+  server->on_http_request_regex(std::regex("^/.*$"), "",
+                                [](auto req, auto args) {
+                                  req->response.body = "catch-all";
+                                  req->response.result(200);
+                                });
+
+  // Register a specific route with insert_front=true so it takes priority
+  server->on_http_request(
+      "/api/<string>", "GET",
+      [](auto req, auto args) {
+        req->response.body = "api:" + args[1];
+        req->response.result(200);
+      },
+      /*insert_front=*/true);
+
+  as->execute([as]() {
+    auto req =
+        asyik::http_easy_request(as, "GET", "http://127.0.0.1:4006/api/hello");
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(req->response.body == "api:hello");
+
+    // non-api path still hits the catch-all
+    auto req2 =
+        asyik::http_easy_request(as, "GET", "http://127.0.0.1:4006/other");
+    REQUIRE(req2->response.result() == 200);
+    REQUIRE(req2->response.body == "catch-all");
+
+    as->stop();
+  });
+
+  as->run();
+}
+
 }  // namespace asyik
