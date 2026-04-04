@@ -8,10 +8,16 @@
 #   bash benchmarks/run_benchmark.sh [OPTIONS]
 #
 # Options:
-#   --target=<libasyik|gin|beast|all>  Which server(s) to benchmark  (default: all)
+#   --target=<libasyik|gin|beast|asio|io_uring|asio_iouring|beast_iouring|libasyik_iouring|libasyik_raw|all>  Which server(s) to benchmark  (default: all)
 #   --port=<N>                    Port for libasyik server      (default: 8080)
 #   --gin-port=<N>                Port for GIN server           (default: 8082)
-#   --beast-port=<N>              Port for Beast server         (default: 8084)
+#   --beast-port=<N>              Port for Beast server         (default: 8086)
+#   --asio-port=<N>               Port for raw Asio server      (default: 8085)
+#   --iouring-port=<N>            Port for raw io_uring server  (default: 8087)
+#   --asio-iouring-port=<N>       Port for Asio+io_uring server (default: 8088)
+#   --beast-iouring-port=<N>      Port for Beast+io_uring       (default: 8089)
+#   --libasyik-iouring-port=<N>   Port for libasyik+io_uring    (default: 8090)
+#   --libasyik-raw-port=<N>      Port for libasyik-raw server  (default: 8091)
 #   --duration=<N>                Seconds per wrk run           (default: 20)
 #   --threads=<N>                 wrk worker threads            (default: 4)
 #   --concurrency=<a,b,c,...>     Comma-separated concurrencies (default: 50,100,200,500)
@@ -38,9 +44,15 @@ die()     { echo -e "${RED}[bench] ERROR:${NC} $*" >&2; exit 1; }
 
 # ── Default parameters ─────────────────────────────────────────────────────────
 TARGET="all"
-PORT=8080
+PORT=9090
 GIN_PORT=8082
 BEAST_PORT=8086
+ASIO_PORT=8085
+IOURING_PORT=8087
+ASIO_IOURING_PORT=8088
+BEAST_IOURING_PORT=8089
+LIBASYIK_IOURING_PORT=8090
+LIBASYIK_RAW_PORT=4004
 DURATION=20
 THREADS=4
 CONCURRENCY="50,100,200,500"
@@ -56,6 +68,12 @@ for arg in "$@"; do
         --port=*)             PORT="${arg#*=}" ;;
         --gin-port=*)         GIN_PORT="${arg#*=}" ;;
         --beast-port=*)       BEAST_PORT="${arg#*=}" ;;
+        --asio-port=*)        ASIO_PORT="${arg#*=}" ;;
+        --iouring-port=*)    IOURING_PORT="${arg#*=}" ;;
+        --asio-iouring-port=*) ASIO_IOURING_PORT="${arg#*=}" ;;
+        --beast-iouring-port=*) BEAST_IOURING_PORT="${arg#*=}" ;;
+        --libasyik-iouring-port=*) LIBASYIK_IOURING_PORT="${arg#*=}" ;;
+        --libasyik-raw-port=*) LIBASYIK_RAW_PORT="${arg#*=}" ;;
         --duration=*)         DURATION="${arg#*=}" ;;
         --threads=*)          THREADS="${arg#*=}" ;;
         --concurrency=*)      CONCURRENCY="${arg#*=}" ;;
@@ -75,6 +93,12 @@ done
 LIBASYIK_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_server"
 GIN_BIN="${SCRIPT_DIR}/gin/bench_gin"
 BEAST_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_beast"
+ASIO_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_asio"
+IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_io_uring"
+ASIO_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_asio_iouring"
+BEAST_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_beast_iouring"
+LIBASYIK_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_server_iouring"
+LIBASYIK_RAW_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_libasyik_raw"
 SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 
 GO_BIN="/usr/local/go/bin"
@@ -94,6 +118,30 @@ fi
 if [[ "${TARGET}" == "beast" || "${TARGET}" == "all" ]]; then
     [[ -x "${BEAST_BIN}" ]] || \
         die "bench_beast not found at ${BEAST_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "asio" || "${TARGET}" == "all" ]]; then
+    [[ -x "${ASIO_BIN}" ]] || \
+        die "bench_asio not found at ${ASIO_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "io_uring" || "${TARGET}" == "all" ]]; then
+    [[ -x "${IOURING_BIN}" ]] || \
+        die "bench_io_uring not found at ${IOURING_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "asio_iouring" || "${TARGET}" == "all" ]]; then
+    [[ -x "${ASIO_IOURING_BIN}" ]] || \
+        die "bench_asio_iouring not found at ${ASIO_IOURING_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "beast_iouring" || "${TARGET}" == "all" ]]; then
+    [[ -x "${BEAST_IOURING_BIN}" ]] || \
+        die "bench_beast_iouring not found at ${BEAST_IOURING_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "libasyik_iouring" || "${TARGET}" == "all" ]]; then
+    [[ -x "${LIBASYIK_IOURING_BIN}" ]] || \
+        die "bench_server_iouring not found at ${LIBASYIK_IOURING_BIN}. Run: bash benchmarks/setup.sh"
+fi
+if [[ "${TARGET}" == "libasyik_raw" || "${TARGET}" == "all" ]]; then
+    [[ -x "${LIBASYIK_RAW_BIN}" ]] || \
+        die "bench_libasyik_raw not found at ${LIBASYIK_RAW_BIN}. Build benchmarks first."
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -293,6 +341,130 @@ bench_beast() {
     trap - EXIT
 }
 
+# ── Benchmark runner for raw Boost.Asio (no Beast) ───────────────────────────
+bench_asio() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Raw Boost.Asio  (port ${ASIO_PORT})"
+    header "  (pure TCP + hand-rolled HTTP — Beast-free baseline)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_asio 2>/dev/null || true; sleep 1
+
+    ASIO_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${ASIO_BIN}" "${ASIO_PORT}" \
+        >"${OUTPUT_DIR}/asio_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${ASIO_PORT}"
+    run_all_scenarios "Asio" "${ASIO_PORT}" "asio"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
+# ── Benchmark runner for raw io_uring ──────────────────────────────────────────
+bench_io_uring() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Raw io_uring  (port ${IOURING_PORT})"
+    header "  (raw liburing — lowest-latency baseline)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_io_uring 2>/dev/null || true; sleep 1
+
+    IOURING_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${IOURING_BIN}" "${IOURING_PORT}" \
+        >"${OUTPUT_DIR}/io_uring_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${IOURING_PORT}"
+    run_all_scenarios "io_uring" "${IOURING_PORT}" "io_uring"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
+# ── Benchmark runner for Asio + io_uring backend ─────────────────────────────
+bench_asio_iouring() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Boost.Asio + io_uring  (port ${ASIO_IOURING_PORT})"
+    header "  (Asio with io_uring reactor instead of epoll)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_asio_iouring 2>/dev/null || true; sleep 1
+
+    ASIO_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${ASIO_IOURING_BIN}" "${ASIO_IOURING_PORT}" \
+        >"${OUTPUT_DIR}/asio_iouring_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${ASIO_IOURING_PORT}"
+    run_all_scenarios "Asio+io_uring" "${ASIO_IOURING_PORT}" "asio_iouring"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
+# ── Benchmark runner for Beast + io_uring backend ────────────────────────────
+bench_beast_iouring() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Boost.Beast + io_uring  (port ${BEAST_IOURING_PORT})"
+    header "  (Beast with io_uring reactor instead of epoll)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_beast_iouring 2>/dev/null || true; sleep 1
+
+    BEAST_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${BEAST_IOURING_BIN}" "${BEAST_IOURING_PORT}" \
+        >"${OUTPUT_DIR}/beast_iouring_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${BEAST_IOURING_PORT}"
+    run_all_scenarios "Beast+io_uring" "${BEAST_IOURING_PORT}" "beast_iouring"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
+# ── Benchmark runner for libasyik + io_uring backend ─────────────────────────
+bench_libasyik_iouring() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: libasyik + io_uring  (port ${LIBASYIK_IOURING_PORT})"
+    header "  (libasyik with Asio io_uring reactor instead of epoll)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_server_iouring 2>/dev/null || true; sleep 1
+
+    ASYIK_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${LIBASYIK_IOURING_BIN}" "${LIBASYIK_IOURING_PORT}" \
+        >"${OUTPUT_DIR}/libasyik_iouring_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${LIBASYIK_IOURING_PORT}"
+    run_all_scenarios "libasyik+io_uring" "${LIBASYIK_IOURING_PORT}" "libasyik_iouring"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+# ── Benchmark runner for libasyik-raw (fibers + raw Asio TCP, no Beast) ──────
+bench_libasyik_raw() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: libasyik-raw  (port ${LIBASYIK_RAW_PORT})"
+    header "  (libasyik fibers + raw Asio TCP — no Beast HTTP layer)"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_libasyik_raw 2>/dev/null || true; sleep 1
+
+    ASYIK_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${LIBASYIK_RAW_BIN}" "${LIBASYIK_RAW_PORT}" \
+        >"${OUTPUT_DIR}/libasyik_raw_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${LIBASYIK_RAW_PORT}"
+    run_all_scenarios "libasyik-raw" "${LIBASYIK_RAW_PORT}" "libasyik_raw"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
 # ── Benchmark runner for GIN ───────────────────────────────────────────────────
 bench_gin() {
     header "══════════════════════════════════════════════════════════"
@@ -321,6 +493,12 @@ echo "  Target:             ${TARGET}"
 echo "  Port (libasyik):    ${PORT}"
 echo "  Port (GIN):         ${GIN_PORT}"
 echo "  Port (Beast):       ${BEAST_PORT}"
+echo "  Port (Asio):        ${ASIO_PORT}"
+echo "  Port (io_uring):    ${IOURING_PORT}"
+echo "  Port (Asio+iou):    ${ASIO_IOURING_PORT}"
+echo "  Port (Beast+iou):   ${BEAST_IOURING_PORT}"
+echo "  Port (libasyik+iou):${LIBASYIK_IOURING_PORT}"
+echo "  Port (libasyik-raw):${LIBASYIK_RAW_PORT}"
 echo "  Duration per run:   ${DURATION}s"
 echo "  wrk threads:        ${THREADS}"
 echo "  Concurrency levels: ${CONCURRENCY}  (delay scenario: ${DELAY_CONCURRENCY})"
@@ -339,12 +517,42 @@ case "${TARGET}" in
     beast)
         bench_beast
         ;;
+    asio)
+        bench_asio
+        ;;
+    io_uring)
+        bench_io_uring
+        ;;
+    asio_iouring)
+        bench_asio_iouring
+        ;;
+    beast_iouring)
+        bench_beast_iouring
+        ;;
+    libasyik_iouring)
+        bench_libasyik_iouring
+        ;;
+    libasyik_raw)
+        bench_libasyik_raw
+        ;;
     all)
         bench_libasyik
         echo ""
         bench_gin
         echo ""
         bench_beast
+        echo ""
+        bench_asio
+        echo ""
+        bench_io_uring
+        echo ""
+        bench_asio_iouring
+        echo ""
+        bench_beast_iouring
+        echo ""
+        bench_libasyik_iouring
+        echo ""
+        bench_libasyik_raw
         # ── Side-by-side comparison ───────────────────────────────────────
         header "══ COMPARISON SUMMARY ══"
         echo ""
@@ -356,9 +564,27 @@ case "${TARGET}" in
         echo ""
         echo -e "${BOLD}Boost.Beast (direct — theoretical ceiling)${NC}"
         cat "${OUTPUT_DIR}/beast_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Raw Boost.Asio (no Beast — TCP baseline)${NC}"
+        cat "${OUTPUT_DIR}/asio_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Raw io_uring (liburing — lowest-latency baseline)${NC}"
+        cat "${OUTPUT_DIR}/io_uring_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Boost.Asio + io_uring backend${NC}"
+        cat "${OUTPUT_DIR}/asio_iouring_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Boost.Beast + io_uring backend${NC}"
+        cat "${OUTPUT_DIR}/beast_iouring_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}libasyik + io_uring backend${NC}"
+        cat "${OUTPUT_DIR}/libasyik_iouring_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}libasyik-raw (fibers + raw Asio TCP, no Beast)${NC}"
+        cat "${OUTPUT_DIR}/libasyik_raw_summary.txt" 2>/dev/null || echo "(no data)"
         ;;
     *)
-        die "Unknown target '${TARGET}'. Use: libasyik | gin | beast | all"
+        die "Unknown target '${TARGET}'. Use: libasyik | gin | beast | asio | io_uring | asio_iouring | beast_iouring | libasyik_iouring | libasyik_raw | all"
         ;;
 esac
 

@@ -14,7 +14,7 @@
  *   GET  /delay/<int>    → sleeps N ms (fiber-aware), returns {"ok":true}
  *
  * Usage:
- *   ./bench_server [port]           default port = 8080
+ *   ./bench_server [port]           default port = 9090
  *
  * Tuning env vars:
  *   ASYIK_THREAD_MULTIPLIER=N      number of service threads (default: nCPU)
@@ -88,7 +88,7 @@ int main(int argc, char* argv[])
   AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::warning);
 
   // ── Port ────────────────────────────────────────────────────────────────
-  uint16_t port = 8080;
+  uint16_t port = 9090;
   if (argc > 1) {
     int p = std::atoi(argv[1]);
     if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);

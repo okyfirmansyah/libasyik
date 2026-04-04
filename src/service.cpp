@@ -70,28 +70,31 @@ void service::run(bool stop_on_complete)
     while (!as->stopped && boost::fibers::channel_op_status::closed !=
                                as->execute_tasks->pop(tsk)) {
       as->active_fiber_count.fetch_add(1, std::memory_order_relaxed);
-      fiber fb([tsk_in = std::move(tsk), as]() mutable {
-        // RAII guard: decrement the counter when this fiber finishes,
-        // regardless of exceptions. The guard destructor runs inside the
-        // still-active fiber (before Boost.Fiber GC takes over), so the
-        // decrement is always visible to the post-drain wait loop.
-        struct FiberGuard {
-          std::atomic<int>& ctr;
-          ~FiberGuard() noexcept
-          {
-            ctr.fetch_sub(1, std::memory_order_release);
-          }
-        } guard{as->active_fiber_count};
+      fiber fb(std::allocator_arg, as->fiber_stack_pool_,
+               [tsk_in = std::move(tsk), as]() mutable {
+                 // RAII guard: decrement the counter when this fiber finishes,
+                 // regardless of exceptions. The guard destructor runs inside
+                 // the still-active fiber (before Boost.Fiber GC takes over),
+                 // so the decrement is always visible to the post-drain wait
+                 // loop.
+                 struct FiberGuard {
+                   std::atomic<int>& ctr;
+                   ~FiberGuard() noexcept
+                   {
+                     ctr.fetch_sub(1, std::memory_order_release);
+                   }
+                 } guard{as->active_fiber_count};
 
-        tsk_in();
+                 tsk_in();
 
-        // Eagerly destroy captured objects (beast streams, websockets, any
-        // Asio-registered handles) HERE, while this fiber is still executing
-        // and the io_context is provably alive.  When Boost.Fiber later
-        // reclaims this fiber's context, tsk_in is already empty so its
-        // destructor is a no-op and the use-after-free race is eliminated.
-        tsk_in = {};
-      });
+                 // Eagerly destroy captured objects (beast streams, websockets,
+                 // any Asio-registered handles) HERE, while this fiber is still
+                 // executing and the io_context is provably alive.  When
+                 // Boost.Fiber later reclaims this fiber's context, tsk_in is
+                 // already empty so its destructor is a no-op and the
+                 // use-after-free race is eliminated.
+                 tsk_in = {};
+               });
       fb.detach();
     }
   });

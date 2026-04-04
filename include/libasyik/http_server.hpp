@@ -18,6 +18,8 @@
 #include "error.hpp"
 #include "http_static.hpp"
 #include "http_types.hpp"
+#include "object_pool.hpp"
+#include "route_table.hpp"
 #include "service.hpp"
 
 namespace fibers = boost::fibers;
@@ -65,13 +67,15 @@ class http_server
               uint16_t port);
 
   template <typename T,
-            std::enable_if_t<!std::is_convertible_v<std::decay_t<T>, string_view>,
-                             int> = 0>
+            std::enable_if_t<
+                !std::is_convertible_v<std::decay_t<T>, string_view>, int> = 0>
   void on_http_request(string_view route_spec, T&& cb,
                        bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_http_request_regex(re, "", std::forward<T>(cb), insert_front);
+    auto route =
+        http_route_tuple{std::string{""}, std::move(re), std::forward<T>(cb)};
+    http_route_table_.add_route(route_spec, std::move(route), insert_front);
   }
 
   template <typename T>
@@ -79,40 +83,36 @@ class http_server
                        bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_http_request_regex(re, method, std::forward<T>(cb), insert_front);
+    auto route = http_route_tuple{std::string{method.data(), method.size()},
+                                  std::move(re), std::forward<T>(cb)};
+    http_route_table_.add_route(route_spec, std::move(route), insert_front);
   }
 
   template <typename R, typename M, typename T>
-  void on_http_request_regex(R&& r, M&& m, T&& cb,
-                             bool insert_front = false)
+  void on_http_request_regex(R&& r, M&& m, T&& cb, bool insert_front = false)
   {
     auto route = http_route_tuple{std::string{std::forward<M>(m)},
                                   std::forward<R>(r), std::forward<T>(cb)};
-    if (insert_front)
-      http_routes.insert(http_routes.begin(), std::move(route));
-    else
-      http_routes.push_back(std::move(route));
+    http_route_table_.add_regex_route(std::move(route), insert_front);
   }
 
   template <typename T,
-            std::enable_if_t<!std::is_convertible_v<std::decay_t<T>, string_view>,
-                             int> = 0>
-  void on_websocket(string_view route_spec, T&& cb,
-                    bool insert_front = false)
+            std::enable_if_t<
+                !std::is_convertible_v<std::decay_t<T>, string_view>, int> = 0>
+  void on_websocket(string_view route_spec, T&& cb, bool insert_front = false)
   {
     std::regex re(internal::route_spec_to_regex(route_spec));
-    on_websocket_regex(re, std::forward<T>(cb), insert_front);
+    auto route = websocket_route_tuple{std::string{""}, std::move(re),
+                                       std::forward<T>(cb)};
+    ws_route_table_.add_route(route_spec, std::move(route), insert_front);
   }
 
   template <typename R, typename T>
   void on_websocket_regex(R&& r, T&& cb, bool insert_front = false)
   {
-    auto route = websocket_route_tuple{"", std::forward<R>(r),
-                                       std::forward<T>(cb)};
-    if (insert_front)
-      ws_routes.insert(ws_routes.begin(), std::move(route));
-    else
-      ws_routes.push_back(std::move(route));
+    auto route =
+        websocket_route_tuple{"", std::forward<R>(r), std::forward<T>(cb)};
+    ws_route_table_.add_regex_route(std::move(route), insert_front);
   }
   /// Serve static files from @p root_dir under the URL prefix @p url_prefix.
   ///
@@ -138,8 +138,7 @@ class http_server
 
     // Escape regex-special characters found in the prefix.
     static const std::regex special_chars{R"([-[\]{}/()*+?.,\^$|#])"};
-    std::string escaped =
-        std::regex_replace(prefix, special_chars, R"(\$&)");
+    std::string escaped = std::regex_replace(prefix, special_chars, R"(\$&)");
 
     // Pattern: <escaped-prefix>  then optionally  /<path>  then query string.
     std::regex re("^" + escaped + R"((\/[^?#\s]*)?(|\?[^\?\s]*)$)");
@@ -171,53 +170,30 @@ class http_server
  private:
   void start_accept(asio::io_context& io_service);
 
-  template <typename RouteType, typename ReqType>
-  const RouteType& find_route(const std::vector<RouteType>& routeList,
-                              const ReqType& req, http_route_args& a) const
-  {
-    auto it = find_if(routeList.begin(), routeList.end(),
-                      [&req, &a](const RouteType& tuple) -> bool {
-                        std::smatch m;
-                        auto method = std::get<0>(tuple);
-                        if (!method.compare("") ||
-                            boost::iequals(method, req.method_string())) {
-                          std::string s{req.target()};
-                          if (std::regex_search(s, m, std::get<1>(tuple))) {
-                            a.clear();
-                            for (const auto& item : m) a.push_back(item.str());
-                            return true;
-                          } else
-                            return false;
-                        } else
-                          return false;
-                      });
-    if (it != routeList.end())
-      return *it;
-    else
-      throw not_found_error("route not found");
-  }
-
   template <typename ReqType>
   const websocket_route_tuple& find_websocket_route(const ReqType& req,
                                                     http_route_args& a) const
   {
-    return find_route(ws_routes, req, a);
+    return ws_route_table_.find(req, a);
   }
 
   template <typename ReqType>
   const http_route_tuple& find_http_route(const ReqType& req,
                                           http_route_args& a) const
   {
-    return find_route(http_routes, req, a);
+    return http_route_table_.find(req, a);
   }
 
   std::shared_ptr<ip::tcp::acceptor> acceptor;
   service_wptr service;
 
-  std::vector<http_route_tuple> http_routes;
-  std::vector<websocket_route_tuple> ws_routes;
+  route_table<http_route_tuple> http_route_table_;
+  route_table<websocket_route_tuple> ws_route_table_;
 
   std::shared_ptr<ssl::context> ssl_context;
+
+  std::shared_ptr<shared_object_pool<http_connection<StreamType>>> conn_pool_;
+  std::shared_ptr<shared_object_pool<http_request>> req_pool_;
 
   size_t request_body_limit;
   size_t request_header_limit;

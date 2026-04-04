@@ -427,6 +427,7 @@ void http_connection<StreamType>::start()
   if (auto server = http_server.lock()) {
     if (auto service = server->service.lock()) {
       service->execute([p = this->shared_from_this(),
+                        req_pool = server->req_pool_,
                         body_limit = server->get_request_body_limit(),
                         header_limit =
                             server->get_request_header_limit()](void) {
@@ -440,7 +441,7 @@ void http_connection<StreamType>::start()
 
           p->handshake_if_ssl();
 
-          auto asyik_req = std::make_shared<http_request>();
+          auto asyik_req = req_pool->acquire();
           auto& req = asyik_req->beast_request;
           asyik_req->connection_wptr = http_connection_wptr<StreamType>(p);
           while (1) {
@@ -626,6 +627,9 @@ template <typename StreamType>
 http_server<StreamType>::http_server(struct private_&&, service_ptr as,
                                      string_view addr, uint16_t port)
     : service(as),
+      conn_pool_(
+          std::make_shared<shared_object_pool<http_connection<StreamType>>>()),
+      req_pool_(std::make_shared<shared_object_pool<http_request>>()),
       request_body_limit(default_request_body_limit),
       request_header_limit(default_request_header_limit)
 {
@@ -644,7 +648,7 @@ void http_server<StreamType>::start_accept(asio::io_context& io_service)
           const boost::system::error_code& error, tcp::socket socket) {
         if (!p.expired() && !error) {
           auto ps = p.lock();
-          auto new_connection = std::make_shared<http_connection<StreamType>>(
+          auto new_connection = ps->conn_pool_->acquire(
               typename http_connection<StreamType>::private_{},
               std::move(socket), ps);
           new_connection->start();

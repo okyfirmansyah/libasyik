@@ -9,6 +9,7 @@
 #include "boost/asio.hpp"
 #include "boost/fiber/all.hpp"
 #include "common.hpp"
+#include "pooled_guarded_stack.hpp"
 
 namespace fibers = boost::fibers;
 using fiber = boost::fibers::fiber;
@@ -181,6 +182,7 @@ class service : public std::enable_shared_from_this<service> {
 
   boost::fibers::condition_variable terminate_req_cond;
   boost::fibers::mutex terminate_req_mtx;
+  pooled_guarded_stack fiber_stack_pool_;
 
  public:
   friend service_ptr make_service();
