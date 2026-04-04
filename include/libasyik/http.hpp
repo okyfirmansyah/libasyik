@@ -590,6 +590,10 @@ void http_connection<StreamType>::start()
               // Keep-alive: reset response state before the next request.
               asyik_req->response.beast_response = http_beast_response{};
               asyik_req->manual_response = false;
+              // Mark safe so that an EOF on the next async_read (client
+              // closing after receiving the response) is silently ignored
+              // instead of flooding the log.
+              safe_to_close = true;
             }
           }
           p->shutdown_ssl();
