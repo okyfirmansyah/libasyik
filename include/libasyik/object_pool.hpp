@@ -17,14 +17,16 @@ class block_pool {
  public:
   explicit block_pool(std::size_t block_size) : block_size_(block_size) {}
 
-  ~block_pool() {
+  ~block_pool()
+  {
     for (void* p : free_list_) ::operator delete(p);
   }
 
   block_pool(const block_pool&) = delete;
   block_pool& operator=(const block_pool&) = delete;
 
-  void* allocate(std::size_t bytes) {
+  void* allocate(std::size_t bytes)
+  {
     if (bytes <= block_size_) {
       std::lock_guard<std::mutex> lk(mu_);
       if (!free_list_.empty()) {
@@ -36,7 +38,8 @@ class block_pool {
     return ::operator new(bytes);
   }
 
-  void deallocate(void* p, std::size_t bytes) noexcept {
+  void deallocate(void* p, std::size_t bytes) noexcept
+  {
     if (bytes <= block_size_) {
       std::lock_guard<std::mutex> lk(mu_);
       free_list_.push_back(p);
@@ -60,27 +63,32 @@ class pool_allocator {
   using value_type = T;
 
   explicit pool_allocator(std::shared_ptr<block_pool> pool) noexcept
-      : pool_(std::move(pool)) {}
+      : pool_(std::move(pool))
+  {}
 
   template <typename U>
-  pool_allocator(const pool_allocator<U>& other) noexcept
-      : pool_(other.pool_) {}
+  pool_allocator(const pool_allocator<U>& other) noexcept : pool_(other.pool_)
+  {}
 
-  T* allocate(std::size_t n) {
+  T* allocate(std::size_t n)
+  {
     return static_cast<T*>(pool_->allocate(n * sizeof(T)));
   }
 
-  void deallocate(T* p, std::size_t n) noexcept {
+  void deallocate(T* p, std::size_t n) noexcept
+  {
     pool_->deallocate(p, n * sizeof(T));
   }
 
   template <typename U>
-  bool operator==(const pool_allocator<U>& other) const noexcept {
+  bool operator==(const pool_allocator<U>& other) const noexcept
+  {
     return pool_ == other.pool_;
   }
 
   template <typename U>
-  bool operator!=(const pool_allocator<U>& other) const noexcept {
+  bool operator!=(const pool_allocator<U>& other) const noexcept
+  {
     return !(*this == other);
   }
 
@@ -105,7 +113,8 @@ class shared_object_pool {
       // block that std::allocate_shared places alongside T.  The exact
       // overhead is implementation-defined; 128 bytes covers all major
       // standard libraries (libstdc++ ~40B, libc++ ~48B, MSVC ~56B).
-      : pool_(std::make_shared<block_pool>(sizeof(T) + 128)) {}
+      : pool_(std::make_shared<block_pool>(sizeof(T) + 128))
+  {}
 
   shared_object_pool(const shared_object_pool&) = delete;
   shared_object_pool& operator=(const shared_object_pool&) = delete;
@@ -113,7 +122,8 @@ class shared_object_pool {
   /// Construct a T in pooled memory and return a shared_ptr.
   /// Both the control block and the object come from the pool.
   template <typename... Args>
-  std::shared_ptr<T> acquire(Args&&... args) {
+  std::shared_ptr<T> acquire(Args&&... args)
+  {
     pool_allocator<T> alloc(pool_);
     return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
   }
