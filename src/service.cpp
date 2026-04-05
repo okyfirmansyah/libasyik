@@ -7,6 +7,7 @@
 
 #include "aixlog.hpp"
 #include "boost/fiber/all.hpp"
+#include "libasyik/asyik_round_robin.hpp"
 
 namespace ip = boost::asio::ip;
 namespace asio = boost::asio;
@@ -31,7 +32,7 @@ service::service(struct service::private_&&)
   if (!default_log_sink)
     default_log_sink =
         AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::info);
-  fibers::use_scheduling_algorithm<fibers::algo::round_robin>();
+  fibers::use_scheduling_algorithm<asyik::asyik_round_robin>();
   execute_task_count = 0;
 }
 
@@ -115,11 +116,12 @@ void service::run(bool stop_on_complete)
         // brief spin phase: yield to other fibers quickly
         boost::this_fiber::yield();
       } else if (idle_count < 200) {
-        // short sleep phase
-        asyik::sleep_for(std::chrono::microseconds(100));
+        // short sleep phase (use boost directly to avoid check_interrupt
+        // in the service run-loop; the main fiber must not be interrupted)
+        boost::this_fiber::sleep_for(std::chrono::microseconds(100));
       } else {
         // deep idle: sleep longer to minimize CPU/syscall overhead
-        asyik::sleep_for(std::chrono::milliseconds(5));
+        boost::this_fiber::sleep_for(std::chrono::milliseconds(5));
       }
     }
     if (!stopped && (!stop_on_complete || execute_task_count > 0))
@@ -144,18 +146,42 @@ void service::run(bool stop_on_complete)
   // that occurs when Boost.Fiber defers context-reclaim past io_context
   // teardown.
   {
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    // Phase 2a: graceful wait — give fibers a chance to finish normally.
+    const auto graceful_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     while (active_fiber_count.load(std::memory_order_acquire) > 0) {
-      if (std::chrono::steady_clock::now() > deadline) {
-        LOG(WARNING) << "service::run(): "
-                     << active_fiber_count.load(std::memory_order_relaxed)
-                     << " fiber(s) still active after 1s drain, forcing exit\n";
+      if (std::chrono::steady_clock::now() > graceful_deadline) {
         break;
       }
       io_service.poll();
       boost::this_fiber::yield();
     }
+
+    // Phase 2b: forceful — if fibers are still alive, activate the scheduler
+    // stop flag so that any worker fiber reaching a suspension point
+    // (check_interrupt) will throw operation_aborted and unwind.
+    if (active_fiber_count.load(std::memory_order_acquire) > 0) {
+      LOG(INFO) << "service::run(): "
+                << active_fiber_count.load(std::memory_order_relaxed)
+                << " fiber(s) still active, triggering scheduler stop\n";
+      auto* sched = asyik_round_robin::current();
+      if (sched) sched->request_stop();
+
+      const auto force_deadline =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+      while (active_fiber_count.load(std::memory_order_acquire) > 0) {
+        if (std::chrono::steady_clock::now() > force_deadline) {
+          LOG(WARNING)
+              << "service::run(): "
+              << active_fiber_count.load(std::memory_order_relaxed)
+              << " fiber(s) still active after scheduler stop, forcing exit\n";
+          break;
+        }
+        io_service.poll();
+        boost::this_fiber::yield();
+      }
+    }
+
     // Final flush: any deregistrations queued by the last batch of fiber
     // completions are processed here, before the io_context is destroyed.
     for (int i = 0; i < 20; i++) {

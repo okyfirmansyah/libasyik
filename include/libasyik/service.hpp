@@ -6,6 +6,7 @@
 
 #include "aixlog.hpp"
 #include "asyik_fwd.hpp"
+#include "asyik_round_robin.hpp"
 #include "boost/asio.hpp"
 #include "boost/fiber/all.hpp"
 #include "common.hpp"
@@ -44,7 +45,9 @@ struct helper<void> {
 template <typename T>
 void sleep_for(T&& t)
 {
+  asyik_round_robin::check_interrupt();
   boost::this_fiber::sleep_for(t);
+  asyik_round_robin::check_interrupt();
 }
 
 struct async_stats {
