@@ -85,6 +85,19 @@ target_link_libraries(bench_libasyik_raw PRIVATE libasyik)
 
 message(STATUS "Benchmark target: bench_libasyik_raw (port 8091 by default)")
 
+# ── bench_drogon: Drogon HTTP framework benchmark ────────────────────────────
+find_package(Drogon QUIET)
+if(Drogon_FOUND)
+    add_executable(bench_drogon drogon/bench_drogon.cpp)
+    target_compile_features(bench_drogon PRIVATE cxx_std_17)
+    target_compile_options(bench_drogon PRIVATE ${BENCH_COMPILE_FLAGS})
+    target_link_libraries(bench_drogon PRIVATE Drogon::Drogon)
+    message(STATUS "Benchmark target: bench_drogon (port 8093 by default)")
+else()
+    message(WARNING "Drogon not found — bench_drogon will NOT be built. "
+                    "Install drogon or build from https://github.com/drogonframework/drogon")
+endif()
+
 # ── bench_asio_iouring: Boost.Asio with io_uring backend (no epoll) ──────────
 # Same code as bench_asio, but compiled with BOOST_ASIO_HAS_IO_URING=1 and
 # BOOST_ASIO_DISABLE_EPOLL=1 so that io_context uses io_uring under the hood.
@@ -198,6 +211,9 @@ if(LIBASYIK_USE_TCMALLOC)
     target_link_libraries(bench_beast PRIVATE tcmalloc_lib)
     target_link_libraries(bench_asio PRIVATE tcmalloc_lib)
     target_link_libraries(bench_libasyik_raw PRIVATE tcmalloc_lib)
+    if(Drogon_FOUND)
+        target_link_libraries(bench_drogon PRIVATE tcmalloc_lib)
+    endif()
     if(URING_LIB AND URING_INCLUDE_DIR)
         target_link_libraries(bench_asio_iouring PRIVATE tcmalloc_lib)
         target_link_libraries(bench_beast_iouring PRIVATE tcmalloc_lib)

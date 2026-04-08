@@ -8,7 +8,7 @@
 #   bash benchmarks/run_benchmark.sh [OPTIONS]
 #
 # Options:
-#   --target=<libasyik|gin|beast|asio|io_uring|asio_iouring|beast_iouring|libasyik_iouring|libasyik_raw|all>  Which server(s) to benchmark  (default: all)
+#   --target=<libasyik|gin|beast|asio|io_uring|asio_iouring|beast_iouring|libasyik_iouring|libasyik_raw|drogon|actix|all>  Which server(s) to benchmark  (default: all)
 #   --port=<N>                    Port for libasyik server      (default: 8080)
 #   --gin-port=<N>                Port for GIN server           (default: 8082)
 #   --beast-port=<N>              Port for Beast server         (default: 8086)
@@ -18,7 +18,7 @@
 #   --beast-iouring-port=<N>      Port for Beast+io_uring       (default: 8089)
 #   --libasyik-iouring-port=<N>   Port for libasyik+io_uring    (default: 8090)
 #   --libasyik-raw-port=<N>      Port for libasyik-raw server  (default: 8091)
-#   --duration=<N>                Seconds per wrk run           (default: 20)
+#   --drogon-port=<N>             Port for Drogon server        (default: 8089)#   --actix-port=<N>              Port for Actix server         (default: 8094)#   --duration=<N>                Seconds per wrk run           (default: 20)
 #   --threads=<N>                 wrk worker threads            (default: 4)
 #   --concurrency=<a,b,c,...>     Comma-separated concurrencies (default: 50,100,200,500)
 #   --delay-ms=<N>                Delay for scenario D in ms    (default: 5)
@@ -53,6 +53,8 @@ ASIO_IOURING_PORT=8088
 BEAST_IOURING_PORT=8089
 LIBASYIK_IOURING_PORT=8090
 LIBASYIK_RAW_PORT=4004
+DROGON_PORT=8093
+ACTIX_PORT=8094
 DURATION=20
 THREADS=4
 CONCURRENCY="50,100,200,500"
@@ -74,6 +76,8 @@ for arg in "$@"; do
         --beast-iouring-port=*) BEAST_IOURING_PORT="${arg#*=}" ;;
         --libasyik-iouring-port=*) LIBASYIK_IOURING_PORT="${arg#*=}" ;;
         --libasyik-raw-port=*) LIBASYIK_RAW_PORT="${arg#*=}" ;;
+        --drogon-port=*)      DROGON_PORT="${arg#*=}" ;;
+        --actix-port=*)       ACTIX_PORT="${arg#*=}" ;;
         --duration=*)         DURATION="${arg#*=}" ;;
         --threads=*)          THREADS="${arg#*=}" ;;
         --concurrency=*)      CONCURRENCY="${arg#*=}" ;;
@@ -99,6 +103,8 @@ ASIO_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_asio_iouring"
 BEAST_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_beast_iouring"
 LIBASYIK_IOURING_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_server_iouring"
 LIBASYIK_RAW_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_libasyik_raw"
+DROGON_BIN="${REPO_ROOT}/build_bench/benchmarks/bench_drogon"
+ACTIX_BIN="${SCRIPT_DIR}/actix/target/release/bench_actix"
 SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 
 GO_BIN="/usr/local/go/bin"
@@ -142,6 +148,14 @@ fi
 if [[ "${TARGET}" == "libasyik_raw" || "${TARGET}" == "all" ]]; then
     [[ -x "${LIBASYIK_RAW_BIN}" ]] || \
         die "bench_libasyik_raw not found at ${LIBASYIK_RAW_BIN}. Build benchmarks first."
+fi
+if [[ "${TARGET}" == "drogon" || "${TARGET}" == "all" ]]; then
+    [[ -x "${DROGON_BIN}" ]] || \
+        die "bench_drogon not found at ${DROGON_BIN}. Build benchmarks first."
+fi
+if [[ "${TARGET}" == "actix" || "${TARGET}" == "all" ]]; then
+    [[ -x "${ACTIX_BIN}" ]] || \
+        die "bench_actix not found at ${ACTIX_BIN}. Run: cd benchmarks/actix && cargo build --release"
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -465,6 +479,46 @@ bench_libasyik_raw() {
     stop_server "${SERVER_PID}"
     trap - EXIT
 }
+# ── Benchmark runner for Drogon ────────────────────────────────────────────────
+bench_drogon() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Drogon  (port ${DROGON_PORT})"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_drogon 2>/dev/null || true; sleep 1
+
+    DROGON_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${DROGON_BIN}" "${DROGON_PORT}" \
+        >"${OUTPUT_DIR}/drogon_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${DROGON_PORT}"
+    run_all_scenarios "Drogon" "${DROGON_PORT}" "drogon"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
+# ── Benchmark runner for Actix ────────────────────────────────────────────────
+bench_actix() {
+    header "══════════════════════════════════════════════════════════"
+    header "  TARGET: Actix-web (Rust)  (port ${ACTIX_PORT})"
+    header "══════════════════════════════════════════════════════════"
+
+    pkill -9 bench_actix 2>/dev/null || true; sleep 1
+
+    ACTIX_THREAD_MULTIPLIER="${THREAD_MULTIPLIER}" "${ACTIX_BIN}" "${ACTIX_PORT}" \
+        >"${OUTPUT_DIR}/actix_server.log" 2>&1 &
+    SERVER_PID=$!
+    trap "stop_server ${SERVER_PID}" EXIT
+
+    wait_for_server "${ACTIX_PORT}"
+    run_all_scenarios "Actix" "${ACTIX_PORT}" "actix"
+
+    stop_server "${SERVER_PID}"
+    trap - EXIT
+}
+
 # ── Benchmark runner for GIN ───────────────────────────────────────────────────
 bench_gin() {
     header "══════════════════════════════════════════════════════════"
@@ -499,6 +553,8 @@ echo "  Port (Asio+iou):    ${ASIO_IOURING_PORT}"
 echo "  Port (Beast+iou):   ${BEAST_IOURING_PORT}"
 echo "  Port (libasyik+iou):${LIBASYIK_IOURING_PORT}"
 echo "  Port (libasyik-raw):${LIBASYIK_RAW_PORT}"
+echo "  Port (Drogon):      ${DROGON_PORT}"
+echo "  Port (Actix):       ${ACTIX_PORT}"
 echo "  Duration per run:   ${DURATION}s"
 echo "  wrk threads:        ${THREADS}"
 echo "  Concurrency levels: ${CONCURRENCY}  (delay scenario: ${DELAY_CONCURRENCY})"
@@ -535,6 +591,12 @@ case "${TARGET}" in
     libasyik_raw)
         bench_libasyik_raw
         ;;
+    drogon)
+        bench_drogon
+        ;;
+    actix)
+        bench_actix
+        ;;
     all)
         bench_libasyik
         echo ""
@@ -553,7 +615,9 @@ case "${TARGET}" in
         bench_libasyik_iouring
         echo ""
         bench_libasyik_raw
-        # ── Side-by-side comparison ───────────────────────────────────────
+        echo ""
+        bench_drogon        echo ""
+        bench_actix        # ── Side-by-side comparison ───────────────────────────────────────
         header "══ COMPARISON SUMMARY ══"
         echo ""
         echo -e "${BOLD}libasyik${NC}"
@@ -582,9 +646,15 @@ case "${TARGET}" in
         echo ""
         echo -e "${BOLD}libasyik-raw (fibers + raw Asio TCP, no Beast)${NC}"
         cat "${OUTPUT_DIR}/libasyik_raw_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Drogon${NC}"
+        cat "${OUTPUT_DIR}/drogon_summary.txt" 2>/dev/null || echo "(no data)"
+        echo ""
+        echo -e "${BOLD}Actix-web (Rust)${NC}"
+        cat "${OUTPUT_DIR}/actix_summary.txt" 2>/dev/null || echo "(no data)"
         ;;
     *)
-        die "Unknown target '${TARGET}'. Use: libasyik | gin | beast | asio | io_uring | asio_iouring | beast_iouring | libasyik_iouring | libasyik_raw | all"
+        die "Unknown target '${TARGET}'. Use: libasyik | gin | beast | asio | io_uring | asio_iouring | beast_iouring | libasyik_iouring | libasyik_raw | drogon | actix | all"
         ;;
 esac
 
