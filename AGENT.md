@@ -343,27 +343,6 @@ cache->erase("key");
 auto mt_cache = asyik::make_memcache_mt<std::string, std::string, 60, 4>(as);
 ```
 
-## Pub/Sub
-
-```cpp
-#include "libasyik/pubsub.hpp"
-
-auto exchange = std::make_shared<asyik::exchange<std::string>>();
-auto sub = exchange->make_subscriber(16);  // buffer capacity
-
-// Publisher fiber
-as->execute([exchange]() {
-    exchange->publish(std::make_shared<std::string>("hello"));
-});
-
-// Subscriber fiber
-as->execute([sub, as]() {
-    auto msg = sub->get();  // fiber yields until message arrives
-    LOG(INFO) << *msg << "\n";
-    as->stop();
-});
-```
-
 ## Inter-Fiber Communication
 
 Use `boost::fibers::buffered_channel` for typed message passing between fibers:
