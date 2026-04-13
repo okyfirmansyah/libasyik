@@ -70,6 +70,20 @@ as->execute([&mtx]() {
 });
 ```
 
+Also use `service::async()` instead of `std::async()`. `std::async` returns a `std::future` whose `.get()` blocks the OS thread (and all fibers). `service::async()` returns a fiber-aware future that yields.
+
+```cpp
+// ✗ WRONG — std::async blocks the fiber scheduler on .get()
+auto result = std::async([&]() {
+    return heavy_query();
+}).get();  // blocks OS thread!
+
+// ✓ CORRECT — service::async yields the fiber
+auto result = as->async([&]() {
+    return heavy_query();
+}).get();  // fiber yields until worker completes
+```
+
 ### RULE 3 — Offload blocking/CPU work with async()
 
 `service::async()` dispatches to a background thread pool. The calling fiber yields until done.
@@ -113,6 +127,7 @@ std::string data = f.get();  // fiber yields until callback fires
 | `std::mutex` | `boost::fibers::mutex` |
 | `std::condition_variable` | `boost::fibers::condition_variable` |
 | `std::promise` / `std::future` | `boost::fibers::promise` / `boost::fibers::future` |
+| `std::async()` | `as->async([]{...}).get()` |
 | Sync file I/O (`fread`, etc.) | `as->async([]{...}).get()` |
 | CPU-heavy computation | `as->async([]{...}).get()` |
 | Sync `boost::asio::connect()` | Async version + `asyik::use_fiber_future` |
@@ -363,3 +378,71 @@ as->set_default_log_severity(4);  // 0=trace ... 6=fatal
 LOG(INFO) << "message\n";
 LOG(WARNING) << "warning\n";
 ```
+
+## SOCI SQLite Pitfalls & Best Practices
+
+The SOCI SQLite3 backend has strict type-mapping rules that differ from PostgreSQL. Code that works with PostgreSQL will often throw `std::bad_cast` on SQLite. Follow these rules when writing SOCI queries for SQLite (or dual-backend code).
+
+### RULE 1 — SQLite INTEGER maps to `int`, never `int64_t`
+
+SOCI's SQLite3 backend reports INTEGER columns as `dt_integer` which maps to C++ `int`. Using `int64_t` (or `long long`) throws `std::bad_cast`.
+
+```cpp
+// ✗ WRONG — throws std::bad_cast on SQLite
+int64_t ts = r.get<int64_t>(0);
+int64_t ts = r.get<long long>(0);
+
+// ✓ CORRECT
+int ts = r.get<int>(0);
+```
+
+For function signatures and variables that store timestamps or IDs, use `int` (not `int64_t`) when targeting SQLite.
+
+### RULE 2 — Avoid `rowset<row>` for aggregated/computed columns
+
+`rowset<row>` uses runtime type detection via `r.get<T>(col)`. SQLite's type affinity for computed expressions (`AVG()`, arithmetic like `(ts / 30) * 30`, `CAST(...)`) is unpredictable through SOCI — the backend may report `dt_integer` or `dt_double` inconsistently, and `CAST(... AS REAL)` may not be honored by SOCI's type detection layer.
+
+```cpp
+// ✗ WRONG — r.get<double>(0) or r.get<int>(0) can both throw std::bad_cast
+//           depending on what SOCI infers for the computed column
+soci::rowset<row> rs = (sql->prepare
+    << "SELECT (ts / :bucket) * :bucket AS bucket_ts, AVG(value) ...",
+    soci::use(bucket, "bucket"));
+for (auto& r : rs) {
+    int ts = r.get<int>(0);        // may throw!
+    double avg = r.get<double>(1);  // may throw!
+}
+
+// ✓ CORRECT — use statement + into() with explicit C++ types
+double bucket_ts = 0, avg_val = 0;
+soci::statement st = (sql->prepare
+    << "SELECT (ts / " + std::to_string(bucket) + ") * " +
+       std::to_string(bucket) + " + 0.0, "
+       "COALESCE(AVG(value), 0) "
+       "FROM metrics WHERE stream_id = :id",
+    soci::use(stream_id, "id"),
+    soci::into(bucket_ts), soci::into(avg_val));
+st.execute();
+while (st.fetch()) {
+    int ts = static_cast<int>(bucket_ts);
+    // use avg_val...
+}
+```
+
+### RULE 3 — Inline integer constants into SQL for arithmetic
+
+SOCI's SQLite backend struggles with named bind parameters used in arithmetic expressions. The parameter binding may fail or produce wrong types.
+
+```cpp
+// ✗ WRONG — named params in arithmetic cause issues on SQLite
+soci::use(bucket_seconds, "bucket")
+// ... "SELECT (ts / :bucket) * :bucket ..."
+
+// ✓ CORRECT — inline integer constants (safe when value is server-controlled)
+std::string q = "SELECT (ts / " + std::to_string(bucket_seconds) + ") * " +
+                std::to_string(bucket_seconds) + " + 0.0 AS bucket_ts ...";
+```
+
+The `+ 0.0` trick forces SQLite to return REAL, ensuring SOCI maps it to `dt_double` which matches `soci::into(double&)`.
+
+> **Security note**: Only inline values derived from server-controlled constants (e.g., hardcoded bucket sizes). Never inline user-supplied strings — always use `soci::use()` for string parameters to prevent SQL injection.
