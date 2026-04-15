@@ -4,10 +4,12 @@
 # Sets up the full benchmark environment:
 #   1. Installs wrk (HTTP load generator)
 #   2. Installs Go (for GIN server)
-#   3. Fetches GIN dependencies (go mod tidy)
-#   4. Builds libasyik bench_server (Release, -O3)
-#   5. Builds GIN bench_gin binary
-#   6. Builds Boost.Beast direct bench_beast binary
+#   3. Installs liburing (for io_uring benchmarks)
+#   4. Fetches GIN dependencies (go mod tidy)
+#   5. Builds libasyik bench_server (Release, -O3)
+#   6. Builds GIN bench_gin binary
+#   7. Builds Boost.Beast direct bench_beast binary
+#   8. Builds io_uring benchmark targets
 #
 # Run once from the repo root:
 #   bash benchmarks/setup.sh
@@ -85,15 +87,35 @@ fi
 export PATH="${GO_INSTALL_DIR}/go/bin:${PATH}"
 go version
 
-# ── 3. Fetch GIN dependencies ─────────────────────────────────────────────────
-info "Step 3/5: Fetching GIN dependencies ..."
+# ── 3. Install liburing ───────────────────────────────────────────────────────────
+LIBURING_VERSION="${LIBURING_VERSION:-2.5}"
+info "Step 3/8: Installing liburing ${LIBURING_VERSION} (for io_uring benchmarks) ..."
+if [[ -f /usr/local/include/liburing.h ]] && [[ -f /usr/local/lib/liburing.a ]]; then
+    success "liburing already installed."
+else
+    $SUDO apt-get install -y build-essential 2>/dev/null || true
+    TMP_URING=$(mktemp -d)
+    git clone --depth=1 --branch "liburing-${LIBURING_VERSION}" \
+        https://github.com/axboe/liburing.git "${TMP_URING}/liburing"
+    cd "${TMP_URING}/liburing"
+    ./configure --prefix=/usr/local
+    make -j"$(nproc)"
+    $SUDO make install
+    rm -rf "${TMP_URING}"
+    # Ensure dynamic linker can find it
+    $SUDO ldconfig 2>/dev/null || true
+    success "liburing ${LIBURING_VERSION} installed."
+fi
+
+# ── 4. Fetch GIN dependencies ─────────────────────────────────────────────────
+info "Step 4/8: Fetching GIN dependencies ..."
 cd "${SCRIPT_DIR}/gin"
 # GONOSUMDB=* skips sum.golang.org verification (appropriate in dev containers)
 GOPATH="${HOME}/go" GONOSUMDB="*" GOFLAGS="-mod=mod" go mod tidy
 success "GIN dependencies ready."
 
-# ── 4. Build libasyik bench_server ────────────────────────────────────────────
-info "Step 4/6: Building libasyik bench_server (Release / -O3) ..."
+# ── 5. Build libasyik bench_server ─────────────────────────────────────────────
+info "Step 5/8: Building libasyik bench_server (Release / -O3) ..."
 mkdir -p "${BUILD_BENCH_DIR}"
 cd "${BUILD_BENCH_DIR}"
 
@@ -108,6 +130,14 @@ cmake "${REPO_ROOT}" \
 
 cmake --build . --target bench_server --parallel "$(nproc)"
 cmake --build . --target bench_beast  --parallel "$(nproc)"
+cmake --build . --target bench_asio   --parallel "$(nproc)"
+
+# Build io_uring targets (will only exist if liburing was found by CMake)
+for iouring_target in bench_io_uring bench_asio_iouring bench_beast_iouring bench_server_iouring; do
+    if grep -q "${iouring_target}" Makefile 2>/dev/null; then
+        cmake --build . --target "${iouring_target}" --parallel "$(nproc)"
+    fi
+done
 
 BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_server"
 [[ -x "${BENCH_BIN}" ]] || die "bench_server binary not found at ${BENCH_BIN}"
@@ -117,14 +147,50 @@ BEAST_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_beast"
 [[ -x "${BEAST_BENCH_BIN}" ]] || die "bench_beast binary not found at ${BEAST_BENCH_BIN}"
 success "Built: ${BEAST_BENCH_BIN}"
 
-# ── 5. Build GIN bench binary ──────────────────────────────────────────────────────
-info "Step 5/6: Building GIN bench_gin binary ..."
+ASIO_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_asio"
+[[ -x "${ASIO_BENCH_BIN}" ]] || die "bench_asio binary not found at ${ASIO_BENCH_BIN}"
+success "Built: ${ASIO_BENCH_BIN}"
+
+# io_uring targets (optional — only if liburing was found during cmake)
+IOURING_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_io_uring"
+if [[ -x "${IOURING_BENCH_BIN}" ]]; then
+    success "Built: ${IOURING_BENCH_BIN}"
+else
+    warn "bench_io_uring not built (liburing may not have been found by CMake)"
+fi
+
+ASIO_IOURING_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_asio_iouring"
+if [[ -x "${ASIO_IOURING_BENCH_BIN}" ]]; then
+    success "Built: ${ASIO_IOURING_BENCH_BIN}"
+else
+    warn "bench_asio_iouring not built"
+fi
+
+BEAST_IOURING_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_beast_iouring"
+if [[ -x "${BEAST_IOURING_BENCH_BIN}" ]]; then
+    success "Built: ${BEAST_IOURING_BENCH_BIN}"
+else
+    warn "bench_beast_iouring not built"
+fi
+
+LIBASYIK_IOURING_BENCH_BIN="${BUILD_BENCH_DIR}/benchmarks/bench_server_iouring"
+if [[ -x "${LIBASYIK_IOURING_BENCH_BIN}" ]]; then
+    success "Built: ${LIBASYIK_IOURING_BENCH_BIN}"
+else
+    warn "bench_server_iouring not built"
+fi
+
+# ── 6. Build GIN bench binary ──────────────────────────────────────────────────
+info "Step 6/8: Building GIN bench_gin binary ..."
 cd "${SCRIPT_DIR}/gin"
 GOPATH="${HOME}/go" GONOSUMDB="*" go build -ldflags="-s -w" -o bench_gin .
 success "Built: ${SCRIPT_DIR}/gin/bench_gin"
 
-# ── 6. bench_beast is already built in step 4 alongside bench_server ─────────────────────────────────────
-info "Step 6/6: bench_beast already built in step 4 (same CMake build tree) — done."
+# ── 7. bench_beast is already built in step 5 alongside bench_server ────────────
+info "Step 7/8: bench_beast already built in step 5 (same CMake build tree) — done."
+
+# ── 8. io_uring targets are already built in step 5 ────────────────────────
+info "Step 8/8: io_uring targets already built in step 5 — done."
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 echo ""
@@ -134,6 +200,11 @@ echo -e "${GREEN}╠════════════════════
 echo -e "${GREEN}║  libasyik server: ${BUILD_BENCH_DIR}/benchmarks/bench_server  ${NC}"
 echo -e "${GREEN}║  GIN server:      ${SCRIPT_DIR}/gin/bench_gin        ${NC}"
 echo -e "${GREEN}║  Beast server:    ${BUILD_BENCH_DIR}/benchmarks/bench_beast    ${NC}"
+echo -e "${GREEN}║  Asio server:     ${BUILD_BENCH_DIR}/benchmarks/bench_asio      ${NC}"
+echo -e "${GREEN}║  io_uring server:  ${BUILD_BENCH_DIR}/benchmarks/bench_io_uring   ${NC}"
+echo -e "${GREEN}║  Asio+iouring:    ${BUILD_BENCH_DIR}/benchmarks/bench_asio_iouring ${NC}"
+echo -e "${GREEN}║  Beast+iouring:   ${BUILD_BENCH_DIR}/benchmarks/bench_beast_iouring${NC}"
+echo -e "${GREEN}║  libasyik+iouring:${BUILD_BENCH_DIR}/benchmarks/bench_server_iouring${NC}"
 echo -e "${GREEN}║  wrk:             $(command -v wrk)                  ${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  Run benchmarks:                                     ║${NC}"

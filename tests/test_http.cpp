@@ -1,5 +1,6 @@
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
+#include "libasyik/route_table.hpp"
 #include "libasyik/service.hpp"
 
 namespace asyik {
@@ -1848,6 +1849,357 @@ TEST_CASE("check route insert_front ordering")
   });
 
   as->run();
+}
+
+// ───────────────────────────────────────────────────────────────────
+// route_table unit tests
+// ───────────────────────────────────────────────────────────────────
+
+// Lightweight request stub for testing route_table::find() without a full
+// Beast request.
+struct stub_request {
+  std::string target_;
+  std::string method_;
+  std::string target() const { return target_; }
+  std::string method_string() const { return method_; }
+};
+
+// Helper: build an http_route_tuple from a route_spec string and optional
+// method.  The callback is a no-op; we only care about matching.
+static http_route_tuple make_route(string_view route_spec,
+                                   string_view method = "")
+{
+  std::regex re(internal::route_spec_to_regex(route_spec));
+  return http_route_tuple{std::string{method.data(), method.size()},
+                          std::move(re), http_route_callback{}};
+}
+
+// ── Helper function tests ──
+
+TEST_CASE("is_static_route identifies static vs parameterized routes",
+          "[route_table]")
+{
+  REQUIRE(is_static_route("/api/v1/users") == true);
+  REQUIRE(is_static_route("/") == true);
+  REQUIRE(is_static_route("/health") == true);
+  REQUIRE(is_static_route("/api/v1/users/<int>") == false);
+  REQUIRE(is_static_route("/<string>/items") == false);
+  REQUIRE(is_static_route("/files/<path>") == false);
+}
+
+TEST_CASE("extract_static_prefix returns correct prefixes", "[route_table]")
+{
+  // Fully static — returns normalised (no trailing slash)
+  REQUIRE(extract_static_prefix("/api/v1/users") == "/api/v1/users");
+  REQUIRE(extract_static_prefix("/api/v1/users/") == "/api/v1/users");
+  REQUIRE(extract_static_prefix("/") == "");
+
+  // Parameterized — returns prefix up to first '<'
+  REQUIRE(extract_static_prefix("/api/v1/users/<int>") == "/api/v1/users/");
+  REQUIRE(extract_static_prefix("/api/<string>/items") == "/api/");
+  REQUIRE(extract_static_prefix("/<int>") == "/");
+}
+
+TEST_CASE("normalise_path strips query string and trailing slash",
+          "[route_table]")
+{
+  REQUIRE(normalise_path("/api/v1/users") == "/api/v1/users");
+  REQUIRE(normalise_path("/api/v1/users/") == "/api/v1/users");
+  REQUIRE(normalise_path("/api?foo=bar") == "/api");
+  REQUIRE(normalise_path("/api/v1/?x=1&y=2") == "/api/v1");
+  // Root stays as "/"
+  REQUIRE(normalise_path("/") == "/");
+  // No query, no trailing slash
+  REQUIRE(normalise_path("/health") == "/health");
+}
+
+// ── Tier 1: exact match ──
+
+TEST_CASE("route_table tier 1 exact match for static routes", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/api/v1/users", make_route("/api/v1/users", "GET"));
+  table.add_route("/health", make_route("/health"));
+
+  http_route_args args;
+
+  // Exact match
+  stub_request req{"/api/v1/users", "GET"};
+  const auto& found = table.find(req, args);
+  REQUIRE(std::get<0>(found) == "GET");
+  REQUIRE(args.size() == 1);
+  REQUIRE(args[0] == "/api/v1/users");
+
+  // Trailing slash normalisation
+  stub_request req2{"/api/v1/users/", "GET"};
+  const auto& found2 = table.find(req2, args);
+  REQUIRE(std::get<0>(found2) == "GET");
+
+  // Query string stripping
+  stub_request req3{"/api/v1/users?page=1", "GET"};
+  const auto& found3 = table.find(req3, args);
+  REQUIRE(std::get<0>(found3) == "GET");
+
+  // Method-agnostic route (empty method matches any)
+  stub_request req4{"/health", "POST"};
+  const auto& found4 = table.find(req4, args);
+  REQUIRE(std::get<0>(found4).empty());
+}
+
+TEST_CASE("route_table tier 1 method filtering", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/api/data", make_route("/api/data", "GET"));
+  table.add_route("/api/data", make_route("/api/data", "POST"));
+
+  http_route_args args;
+
+  stub_request get_req{"/api/data", "GET"};
+  const auto& get_found = table.find(get_req, args);
+  REQUIRE(std::get<0>(get_found) == "GET");
+
+  stub_request post_req{"/api/data", "POST"};
+  const auto& post_found = table.find(post_req, args);
+  REQUIRE(std::get<0>(post_found) == "POST");
+
+  // DELETE not registered — should throw
+  stub_request del_req{"/api/data", "DELETE"};
+  REQUIRE_THROWS_AS(table.find(del_req, args), not_found_error);
+}
+
+// ── Tier 2: prefix + regex ──
+
+TEST_CASE("route_table tier 2 parameterized route matching", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/api/v1/users/<int>",
+                  make_route("/api/v1/users/<int>", "GET"));
+  table.add_route("/api/v1/<string>/items",
+                  make_route("/api/v1/<string>/items", "GET"));
+
+  http_route_args args;
+
+  // <int> capture
+  stub_request req1{"/api/v1/users/42", "GET"};
+  const auto& found1 = table.find(req1, args);
+  REQUIRE(std::get<0>(found1) == "GET");
+  REQUIRE(args.size() >= 2);
+  REQUIRE(args[1] == "42");
+
+  // <string> capture
+  stub_request req2{"/api/v1/widgets/items", "GET"};
+  const auto& found2 = table.find(req2, args);
+  REQUIRE(args[1] == "widgets");
+
+  // Non-matching prefix — should not match
+  stub_request req3{"/other/v1/users/42", "GET"};
+  REQUIRE_THROWS_AS(table.find(req3, args), not_found_error);
+}
+
+TEST_CASE("route_table tier 2 prefix check skips non-matching entries",
+          "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/alpha/<int>", make_route("/alpha/<int>", "GET"));
+  table.add_route("/beta/<string>", make_route("/beta/<string>", "GET"));
+
+  http_route_args args;
+
+  // Should match /beta/, not /alpha/
+  stub_request req{"/beta/hello", "GET"};
+  const auto& found = table.find(req, args);
+  REQUIRE(args[1] == "hello");
+
+  // /alpha/ with non-numeric should NOT match <int>
+  stub_request req2{"/alpha/abc", "GET"};
+  REQUIRE_THROWS_AS(table.find(req2, args), not_found_error);
+}
+
+// ── Tier 3: fallback regex ──
+
+TEST_CASE("route_table tier 3 fallback regex routes", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  // Raw regex — no route_spec structure
+  auto route = http_route_tuple{"GET", std::regex(R"(^/files/(.+)$)"),
+                                http_route_callback{}};
+  table.add_regex_route(std::move(route));
+
+  http_route_args args;
+
+  stub_request req{"/files/docs/readme.txt", "GET"};
+  const auto& found = table.find(req, args);
+  REQUIRE(std::get<0>(found) == "GET");
+  REQUIRE(args.size() >= 2);
+  REQUIRE(args[1] == "docs/readme.txt");
+
+  stub_request req2{"/other/path", "GET"};
+  REQUIRE_THROWS_AS(table.find(req2, args), not_found_error);
+}
+
+// ── Cross-tier priority ──
+
+TEST_CASE("route_table tier priority: exact > prefix > fallback",
+          "[route_table]")
+{
+  route_table<http_route_tuple> table;
+
+  // Tier 3 fallback: catch-all
+  auto fallback =
+      http_route_tuple{"", std::regex(R"(^/api.*$)"), http_route_callback{}};
+  table.add_regex_route(std::move(fallback));
+
+  // Tier 2 parameterized
+  table.add_route("/api/users/<int>", make_route("/api/users/<int>", "GET"));
+
+  // Tier 1 exact
+  table.add_route("/api/users/42", make_route("/api/users/42", "GET"));
+
+  http_route_args args;
+
+  // Should match exact (Tier 1), not parameterized or fallback
+  stub_request req1{"/api/users/42", "GET"};
+  const auto& found1 = table.find(req1, args);
+  // Tier 1 returns path as args[0], no capture groups
+  REQUIRE(args.size() == 1);
+  REQUIRE(args[0] == "/api/users/42");
+
+  // Should match Tier 2 (parameterized), not fallback
+  stub_request req2{"/api/users/99", "GET"};
+  const auto& found2 = table.find(req2, args);
+  REQUIRE(args.size() >= 2);
+  REQUIRE(args[1] == "99");
+
+  // Should fall through to Tier 3 (fallback)
+  stub_request req3{"/api/other", "GET"};
+  const auto& found3 = table.find(req3, args);
+  // Fallback match — came from regex_route
+  REQUIRE(args[0].find("/api") != std::string::npos);
+}
+
+// ── insert_front ordering ──
+
+TEST_CASE("route_table insert_front within same tier", "[route_table]")
+{
+  // Tier 2: two parameterized routes with overlapping prefix
+  route_table<http_route_tuple> table;
+  table.add_route("/api/<string>", make_route("/api/<string>", "GET"));
+  // This one is inserted at front, should match first
+  table.add_route("/api/<int>", make_route("/api/<int>", "GET"),
+                  /*insert_front=*/true);
+
+  http_route_args args;
+
+  // "123" matches both <int> and <string>; <int> inserted first, wins
+  stub_request req{"/api/123", "GET"};
+  const auto& found = table.find(req, args);
+  REQUIRE(args[1] == "123");
+
+  // Tier 1: exact routes with same path, different methods
+  route_table<http_route_tuple> table2;
+  table2.add_route("/data", make_route("/data", "GET"));
+  table2.add_route("/data", make_route("/data", "POST"),
+                   /*insert_front=*/true);
+
+  // POST inserted at front — for a POST request it should match first
+  stub_request post_req{"/data", "POST"};
+  const auto& found2 = table2.find(post_req, args);
+  REQUIRE(std::get<0>(found2) == "POST");
+
+  // Tier 3: fallback insert_front
+  route_table<http_route_tuple> table3;
+  auto r1 = http_route_tuple{"GET", std::regex(R"(^/x/(.*)$)"),
+                             http_route_callback{}};
+  table3.add_regex_route(std::move(r1));
+  auto r2 = http_route_tuple{"GET", std::regex(R"(^/x/special$)"),
+                             http_route_callback{}};
+  table3.add_regex_route(std::move(r2), /*insert_front=*/true);
+
+  stub_request xreq{"/x/special", "GET"};
+  const auto& found3 = table3.find(xreq, args);
+  // The front-inserted route matches "special" exactly
+  REQUIRE(args[0] == "/x/special");
+}
+
+// ── empty table / not found ──
+
+TEST_CASE("route_table empty table throws not_found_error", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  REQUIRE(table.empty());
+
+  http_route_args args;
+  stub_request req{"/anything", "GET"};
+  REQUIRE_THROWS_AS(table.find(req, args), not_found_error);
+}
+
+TEST_CASE("route_table empty() reflects state correctly", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  REQUIRE(table.empty());
+
+  table.add_route("/x", make_route("/x"));
+  REQUIRE_FALSE(table.empty());
+}
+
+// ── Method case-insensitivity ──
+
+TEST_CASE("route_table method matching is case-insensitive", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/api", make_route("/api", "GET"));
+
+  http_route_args args;
+
+  stub_request req{"/api", "get"};
+  REQUIRE_NOTHROW(table.find(req, args));
+
+  stub_request req2{"/api", "Get"};
+  REQUIRE_NOTHROW(table.find(req2, args));
+}
+
+// ── <path> tag matching ──
+
+TEST_CASE("route_table path tag captures slashes", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/static/<path>", make_route("/static/<path>", "GET"));
+
+  http_route_args args;
+
+  stub_request req{"/static/css/style.css", "GET"};
+  const auto& found = table.find(req, args);
+  REQUIRE(args.size() >= 2);
+  REQUIRE(args[1] == "css/style.css");
+}
+
+// ── Integration: use with real http_beast_request ──
+
+TEST_CASE("route_table works with real http_beast_request", "[route_table]")
+{
+  route_table<http_route_tuple> table;
+  table.add_route("/api/v1/health", make_route("/api/v1/health", "GET"));
+  table.add_route("/api/v1/users/<int>",
+                  make_route("/api/v1/users/<int>", "GET"));
+
+  http_route_args args;
+
+  // Use a real Beast request object
+  http_beast_request beast_req;
+  beast_req.method(boost::beast::http::verb::get);
+  beast_req.target("/api/v1/health");
+
+  const auto& found = table.find(beast_req, args);
+  REQUIRE(std::get<0>(found) == "GET");
+  REQUIRE(args[0] == "/api/v1/health");
+
+  // Parameterized with Beast request
+  http_beast_request beast_req2;
+  beast_req2.method(boost::beast::http::verb::get);
+  beast_req2.target("/api/v1/users/7");
+
+  const auto& found2 = table.find(beast_req2, args);
+  REQUIRE(args[1] == "7");
 }
 
 }  // namespace asyik

@@ -60,7 +60,7 @@ ASYIK_DEFINE_RUNTIME_ERROR(timeout_error, boost::system::system_error,
                            boost::asio::error::timed_out);
 ASYIK_DEFINE_RUNTIME_ERROR(service_terminated_error,
                            boost::system::system_error,
-                           boost::asio::error::shut_down);
+                           boost::asio::error::operation_aborted);
 
 }  // namespace asyik
 
