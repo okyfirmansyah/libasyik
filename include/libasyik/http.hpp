@@ -655,6 +655,7 @@ void http_server<StreamType>::start_accept(asio::io_context& io_service)
           auto new_connection = ps->conn_pool_->acquire(
               typename http_connection<StreamType>::private_{},
               std::move(socket), ps);
+          ps->register_connection(new_connection);
           new_connection->start();
           if (!ps->service.expired()) {
             auto service = ps->service.lock();
