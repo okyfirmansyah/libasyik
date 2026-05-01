@@ -1,15 +1,18 @@
 #ifndef LIBASYIK_ASYIK_HTTP_SERVER_HPP
 #define LIBASYIK_ASYIK_HTTP_SERVER_HPP
 
+#include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/any.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/fiber/mutex.hpp>
 #include <regex>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include "asyik_fwd.hpp"
 #include "boost/asio.hpp"
@@ -165,10 +168,58 @@ class http_server
   void set_request_header_limit(size_t l) { request_header_limit = l; }
 
   void set_request_body_limit(size_t l) { request_body_limit = l; }
-  void close() { acceptor->close(); }
+
+  /// Stop accepting new connections AND forcefully close all currently active
+  /// connections.  Closing the underlying sockets cancels any pending
+  /// async_read / async_write operations with operation_aborted, which lets
+  /// the per-connection handler fibers unwind cleanly.
+  ///
+  /// Without this, a keep-alive client that holds the connection open after
+  /// receiving its response would keep the connection-handler fiber blocked
+  /// in async_read forever.  Because that fiber captures a service_ptr by
+  /// value, the io_context never gets destroyed and the program hangs at
+  /// exit.
+  void close()
+  {
+    boost::system::error_code ec;
+    acceptor->close(ec);
+
+    std::vector<std::shared_ptr<http_connection<StreamType>>> live;
+    {
+      std::lock_guard<fibers::mutex> lk(connections_mutex_);
+      live.reserve(active_connections_.size());
+      for (auto& w : active_connections_) {
+        if (auto s = w.lock()) live.push_back(std::move(s));
+      }
+      active_connections_.clear();
+    }
+
+    for (auto& c : live) {
+      boost::system::error_code cec;
+      auto& sock = beast::get_lowest_layer(c->get_stream()).socket();
+      sock.cancel(cec);
+      sock.close(cec);
+    }
+  }
 
  private:
   void start_accept(asio::io_context& io_service);
+
+  /// Register a freshly-accepted connection so that close() can reach it.
+  /// Opportunistically prunes expired weak_ptrs to keep the vector bounded.
+  void register_connection(
+      const std::shared_ptr<http_connection<StreamType>>& conn)
+  {
+    std::lock_guard<fibers::mutex> lk(connections_mutex_);
+    // Prune expired entries lazily.
+    active_connections_.erase(
+        std::remove_if(active_connections_.begin(), active_connections_.end(),
+                       [](const std::weak_ptr<http_connection<StreamType>>& w) {
+                         return w.expired();
+                       }),
+        active_connections_.end());
+    active_connections_.emplace_back(conn);
+  }
 
   template <typename ReqType>
   const websocket_route_tuple& find_websocket_route(const ReqType& req,
@@ -194,6 +245,12 @@ class http_server
 
   std::shared_ptr<shared_object_pool<http_connection<StreamType>>> conn_pool_;
   std::shared_ptr<shared_object_pool<http_request>> req_pool_;
+
+  // Tracking of live server-side connections so that close() can cancel
+  // their pending async I/O.  Stored as weak_ptrs to avoid keeping
+  // connections alive past their natural lifetime.
+  fibers::mutex connections_mutex_;
+  std::vector<std::weak_ptr<http_connection<StreamType>>> active_connections_;
 
   size_t request_body_limit;
   size_t request_header_limit;

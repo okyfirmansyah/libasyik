@@ -2202,4 +2202,92 @@ TEST_CASE("route_table works with real http_beast_request", "[route_table]")
   REQUIRE(args[1] == "7");
 }
 
+// ───────────────────────────────────────────────────────────────────
+// Regression test: service must terminate even when a keep-alive client
+// holds the connection open after server->close() / service::stop().
+// ───────────────────────────────────────────────────────────────────
+
+TEST_CASE("service terminates with stuck keep-alive client",
+          "[http][termination]")
+{
+  namespace asio = boost::asio;
+  namespace beast = boost::beast;
+  namespace bhttp = boost::beast::http;
+  using tcp = boost::asio::ip::tcp;
+
+  const uint16_t port = 4321;
+  auto service = asyik::make_service();
+  auto server = asyik::make_http_server(service, "127.0.0.1", port);
+
+  server->on_http_request(
+      "/", "GET",
+      [](asyik::http_request_ptr req, const asyik::http_route_args&) {
+        req->response.body = "ok";
+        req->response.headers.set("Content-Type", "text/plain");
+        req->response.result(200);
+      });
+
+  std::atomic<bool> client_received{false};
+  std::atomic<bool> client_should_exit{false};
+
+  std::thread client([&]() {
+    try {
+      asio::io_context io;
+      tcp::resolver resolver(io);
+      beast::tcp_stream stream(io);
+      auto endpoints = resolver.resolve("127.0.0.1", std::to_string(port));
+      stream.connect(endpoints);
+
+      bhttp::request<bhttp::empty_body> req{bhttp::verb::get, "/", 11};
+      req.set(bhttp::field::host, "127.0.0.1");
+      req.set(bhttp::field::connection, "keep-alive");
+      req.keep_alive(true);
+      bhttp::write(stream, req);
+
+      beast::flat_buffer buffer;
+      bhttp::response<bhttp::string_body> res;
+      bhttp::read(stream, buffer, res);
+
+      client_received.store(true, std::memory_order_release);
+
+      // Hold the keep-alive connection open until the test signals exit.
+      while (!client_should_exit.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      }
+    } catch (...) {
+      // ignore
+    }
+  });
+
+  asio::steady_timer stop_timer(service->get_io_service());
+  std::function<void()> arm_stop_timer;
+  arm_stop_timer = [&]() {
+    stop_timer.expires_after(std::chrono::milliseconds(50));
+    stop_timer.async_wait([&](const boost::system::error_code& ec) {
+      if (ec) return;
+      if (!client_received.load(std::memory_order_acquire)) {
+        arm_stop_timer();
+        return;
+      }
+      server->close();
+      service->stop();
+    });
+  };
+  arm_stop_timer();
+
+  auto t0 = std::chrono::steady_clock::now();
+  service->run();
+  auto t1 = std::chrono::steady_clock::now();
+  auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+  // The service must terminate within a bounded time despite the keep-alive
+  // client still holding the connection open.
+  INFO("service->run() returned after " << ms << "ms");
+  REQUIRE(ms < 5000);
+
+  client_should_exit.store(true, std::memory_order_release);
+  if (client.joinable()) client.join();
+}
+
 }  // namespace asyik
