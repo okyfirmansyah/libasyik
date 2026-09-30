@@ -62,14 +62,24 @@ class rate_limit : public std::enable_shared_from_this<rate_limit<store>> {
     try {
       s.get_quota(hash, remaining, current_ms);
 
-      unsigned int distance_ms = now_ms - current_ms;
+      uint32_t distance_ms = now_ms - current_ms;
 
       // adjust remaining based on last checkpoint
-      unsigned int recovered_quota = (distance_ms * rate) / 1000;
+      uint64_t recovered_quota = (uint64_t{distance_ms} * rate) / 1000;
       if (recovered_quota) {
-        remaining += recovered_quota;
-        if (remaining > max_bucket) remaining = max_bucket;
-        current_ms = now_ms;
+        if (remaining + recovered_quota >= max_bucket) {
+          // full bucket: idle time beyond this is not banked
+          remaining = max_bucket;
+          current_ms = now_ms;
+        } else {
+          remaining += static_cast<unsigned int>(recovered_quota);
+          // Advance only by the time these tokens took (rounded up, so never
+          // over-granting). Resetting to now_ms would discard the partial
+          // token accrued since, under-granting whenever checkpoints are
+          // infrequent, e.g. by ~25% at 45/s with ~15ms between checkpoints.
+          current_ms +=
+              static_cast<uint32_t>((recovered_quota * 1000 + rate - 1) / rate);
+        }
       }
     } catch (std::out_of_range& e) {
       remaining = max_bucket;
