@@ -49,7 +49,12 @@ http_server_ptr<https_stream_type> make_https_server(service_ptr,
 
 namespace internal {
 std::string route_spec_to_regex(string_view route_spc);
-}
+
+// Apply address-reuse socket options before bind(). reuse_port requests
+// kernel load balancing across acceptors (SO_REUSEPORT), which is not
+// available on Windows (ignored there, with a warning).
+void set_acceptor_reuse_options(ip::tcp::acceptor& acceptor, bool reuse_port);
+}  // namespace internal
 
 template <typename StreamType>
 class http_server

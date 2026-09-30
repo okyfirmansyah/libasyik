@@ -1,23 +1,35 @@
 #ifndef LIBASYIK_ASYIK_POOLED_GUARDED_STACK_HPP
 #define LIBASYIK_ASYIK_POOLED_GUARDED_STACK_HPP
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <sys/mman.h>
+#endif
 
 #include <boost/context/stack_context.hpp>
 #include <boost/context/stack_traits.hpp>
 #include <cassert>
 #include <cstddef>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <vector>
 
 namespace asyik {
 
 /// A fiber stack allocator that combines pooling with mmap guard pages.
 ///
-/// Each stack is allocated via mmap with an extra guard page at the bottom
-/// (mprotect PROT_NONE). When a fiber finishes, the stack is returned to a
-/// free-list instead of being munmap'd. On reuse the guard page is still in
-/// place — no extra syscalls needed.
+/// Each stack is allocated via mmap (VirtualAlloc on Windows) with an extra
+/// guard page at the bottom (mprotect PROT_NONE / PAGE_NOACCESS). When a fiber
+/// finishes, the stack is returned to a free-list instead of being munmap'd. On
+/// reuse the guard page is still in place — no extra syscalls needed.
 ///
 /// The internal storage is reference-counted (via shared_ptr), so copies of
 /// the allocator share the same pool — matching the semantics of
@@ -53,7 +65,7 @@ class pooled_guarded_stack {
     ~impl()
     {
       for (void* base : free_list_) {
-        ::munmap(base, mmap_size_);
+        unmap(base);
       }
     }
 
@@ -89,6 +101,20 @@ class pooled_guarded_stack {
           return base;
         }
       }
+#ifdef _WIN32
+      // Allocate a new stack via VirtualAlloc
+      void* base = ::VirtualAlloc(nullptr, mmap_size_, MEM_COMMIT | MEM_RESERVE,
+                                  PAGE_READWRITE);
+      if (!base) {
+        throw std::bad_alloc();
+      }
+      // Set the first page as a guard page (no access)
+      DWORD old_protect;
+      if (!::VirtualProtect(base, page_size_, PAGE_NOACCESS, &old_protect)) {
+        unmap(base);
+        throw std::bad_alloc();
+      }
+#else
       // Allocate a new stack via mmap
       void* base = ::mmap(nullptr, mmap_size_, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -97,10 +123,20 @@ class pooled_guarded_stack {
       }
       // Set the first page as a guard page (PROT_NONE)
       if (::mprotect(base, page_size_, PROT_NONE) != 0) {
-        ::munmap(base, mmap_size_);
+        unmap(base);
         throw std::bad_alloc();
       }
+#endif
       return base;
+    }
+
+    void unmap(void* base) noexcept
+    {
+#ifdef _WIN32
+      ::VirtualFree(base, 0, MEM_RELEASE);
+#else
+      ::munmap(base, mmap_size_);
+#endif
     }
 
     std::size_t stack_size_;

@@ -45,6 +45,26 @@ std::string route_spec_to_regex(string_view route_spc)
   return regex_spec;
 }
 
+void set_acceptor_reuse_options(ip::tcp::acceptor& acceptor, bool reuse_port)
+{
+#ifdef _WIN32
+  // Windows has no SO_REUSEPORT, and its SO_REUSEADDR lets any socket steal
+  // the port (non-deterministic delivery), so neither emulates Linux. Bind
+  // exclusively instead; TIME_WAIT does not block re-binding on Windows.
+  // A second acceptor on the same port therefore fails with address_in_use.
+  if (reuse_port)
+    LOG(WARNING) << "reuse_port (SO_REUSEPORT) is not supported on Windows, "
+                    "ignored\n";
+  BOOL one = TRUE;
+  ::setsockopt(acceptor.native_handle(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+               reinterpret_cast<const char*>(&one), sizeof(one));
+#else
+  int one = 1;
+  setsockopt(acceptor.native_handle(), SOL_SOCKET,
+             SO_REUSEADDR | (SO_REUSEPORT * reuse_port), &one, sizeof(one));
+#endif
+}
+
 }  // namespace internal
 
 bool http_analyze_url(string_view u, http_url_scheme& scheme)

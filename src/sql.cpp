@@ -2,7 +2,13 @@
 
 #include <libpq-fe.h>
 
+#ifdef _WIN32
+#include <boost/asio/ip/tcp.hpp>
+#else
+#include <unistd.h>
+
 #include <boost/asio/posix/stream_descriptor.hpp>
+#endif
 #include <memory>
 
 #include "aixlog.hpp"
@@ -14,6 +20,44 @@
 namespace fibers = boost::fibers;
 
 namespace asyik {
+
+// Wrap a duplicate of libpq's socket so that closing the Asio object (on
+// unlisten or session destruction) never closes the socket libpq still owns.
+static std::unique_ptr<sql_session::notify_stream_type> make_notify_stream(
+    asio::io_context& io, int sock)
+{
+#ifdef _WIN32
+  WSAPROTOCOL_INFOW info;
+  if (WSADuplicateSocketW(static_cast<SOCKET>(sock), GetCurrentProcessId(),
+                          &info) != 0)
+    return nullptr;
+  SOCKET dup = WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO,
+                          FROM_PROTOCOL_INFO, &info, 0, WSA_FLAG_OVERLAPPED);
+  if (dup == INVALID_SOCKET) return nullptr;
+  auto protocol = info.iAddressFamily == AF_INET6 ? asio::ip::tcp::v6()
+                                                  : asio::ip::tcp::v4();
+  auto stream = std::make_unique<sql_session::notify_stream_type>(io);
+  boost::system::error_code ec;
+  stream->assign(protocol, dup, ec);
+  if (ec) {
+    closesocket(dup);
+    return nullptr;
+  }
+  return stream;
+#else
+  int fd = ::dup(sock);
+  if (fd < 0) return nullptr;
+  auto stream = std::make_unique<sql_session::notify_stream_type>(io);
+  boost::system::error_code ec;
+  stream->assign(fd, ec);
+  if (ec) {
+    ::close(fd);
+    return nullptr;
+  }
+  return stream;
+#endif
+}
+
 sql_session_ptr sql_pool::get_session(service_ptr as)
 {
   auto session = std::make_shared<sql_session>(sql_session::private_{});
@@ -78,10 +122,10 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
     int sock = PQsocket(conn);
     if (sock < 0) return;
 
-    // create stream_descriptor if not present (C++11 compatible)
+    // create stream if not present
     if (!notify_stream) {
-      notify_stream.reset(
-          new asio::posix::stream_descriptor(service->get_io_service(), sock));
+      notify_stream = make_notify_stream(service->get_io_service(), sock);
+      if (!notify_stream) return;
     }
 
     if (notify_running) return;
@@ -148,8 +192,8 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
       // re-arm async wait using the live session
       try {
         if (self->notify_stream && self->notify_running) {
-          self->notify_stream->async_wait(
-              asio::posix::stream_descriptor::wait_read, *handler_ptr);
+          self->notify_stream->async_wait(notify_stream_type::wait_read,
+                                          *handler_ptr);
         }
       } catch (...) {
         std::lock_guard<fibers::mutex> l(self->notify_mtx);
@@ -158,8 +202,7 @@ void sql_session::listen(const std::string& channel, notify_handler_t handler)
     };
 
     // start first wait
-    notify_stream->async_wait(asio::posix::stream_descriptor::wait_read,
-                              *handler_ptr);
+    notify_stream->async_wait(notify_stream_type::wait_read, *handler_ptr);
   } catch (...) {
   }
 }

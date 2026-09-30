@@ -100,7 +100,8 @@ bool find_multipart_boundary(S& stream, B& buffer, const std::string& boundary)
   std::string terminate_line = boundary + "--\r\n";
 
   while (1) {
-    string_view s(asio::buffer_cast<const char*>(buffer.data()), buffer.size());
+    string_view s(static_cast<const char*>(buffer.data().data()),
+                  buffer.size());
 
     auto pos = s.find(boundary_line);
     if (pos > s.size()) {

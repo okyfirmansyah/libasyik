@@ -7,11 +7,16 @@
 
 // Full http_request definition (http_static.hpp only has the forward decl
 // via http_types.hpp → asyik_fwd.hpp)
-#include <fcntl.h>
-#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <filesystem>
+#include <fstream>
+#else
+#include <fcntl.h>
+#include <limits.h>
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <cstring>
@@ -88,11 +93,30 @@ std::string make_etag(long long mtime, long long size)
 static std::string format_http_date(time_t t)
 {
   struct tm tm_buf;
+#ifdef _WIN32
+  gmtime_s(&tm_buf, &t);
+#else
   gmtime_r(&t, &tm_buf);
+#endif
   char buf[64];
   strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm_buf);
   return std::string(buf);
 }
+
+#ifdef _WIN32
+// strptime() replacement (C locale); returns non-null on success like
+// strptime. std::get_time skips leading whitespace, so "%d" also covers the
+// space-padded "%e" day of the ANSI C format.
+static const char* strptime(const char* s, const char* fmt, struct tm* t)
+{
+  std::istringstream iss(s);
+  iss.imbue(std::locale::classic());
+  iss >> std::get_time(t, fmt);
+  return iss.fail() ? nullptr : s;
+}
+
+static time_t timegm(struct tm* t) { return _mkgmtime(t); }
+#endif
 
 static time_t parse_http_date(const std::string& s)
 {
@@ -100,9 +124,15 @@ static time_t parse_http_date(const std::string& s)
   // RFC 7231 preferred: "Sun, 06 Nov 1994 08:49:37 GMT"
   if (strptime(s.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &t)) return timegm(&t);
   // RFC 850: "Sunday, 06-Nov-94 08:49:37 GMT"
+  t = {};
   if (strptime(s.c_str(), "%A, %d-%b-%y %H:%M:%S GMT", &t)) return timegm(&t);
   // ANSI C: "Sun Nov  6 08:49:37 1994"
+  t = {};
+#ifdef _WIN32
+  if (strptime(s.c_str(), "%a %b %d %H:%M:%S %Y", &t)) return timegm(&t);
+#else
   if (strptime(s.c_str(), "%a %b %e %H:%M:%S %Y", &t)) return timegm(&t);
+#endif
   return static_cast<time_t>(-1);
 }
 
@@ -132,6 +162,68 @@ static std::string percent_decode(const std::string& encoded)
 // Low-level file read helpers
 // ---------------------------------------------------------------------------
 
+struct file_info {
+  bool is_dir;
+  bool is_regular;
+  time_t mtime;
+  long long size;
+};
+
+#ifdef _WIN32
+
+/// Canonicalise @p path (resolving symlinks). Output uses '/' separators so
+/// the traversal prefix checks below work the same as on POSIX.
+static bool resolve_path(const std::string& path, std::string& out)
+{
+  std::error_code ec;
+  auto p = std::filesystem::canonical(std::filesystem::u8path(path), ec);
+  if (ec) return false;
+  out = p.generic_u8string();
+  return true;
+}
+
+static bool stat_path(const std::string& path, file_info& info)
+{
+  struct _stat64 st;
+  if (_wstat64(std::filesystem::u8path(path).c_str(), &st) != 0) return false;
+  info.is_dir = (st.st_mode & _S_IFMT) == _S_IFDIR;
+  info.is_regular = (st.st_mode & _S_IFMT) == _S_IFREG;
+  info.mtime = static_cast<time_t>(st.st_mtime);
+  info.size = static_cast<long long>(st.st_size);
+  return true;
+}
+
+/// Read [offset, offset+length) bytes of the file at @p path into buf.
+static bool read_file_range(const std::string& path, char* buf,
+                            long long offset, size_t length)
+{
+  std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
+  if (!f.is_open()) return false;
+  if (!f.seekg(offset)) return false;
+  return static_cast<bool>(f.read(buf, static_cast<std::streamsize>(length)));
+}
+
+#else
+
+static bool resolve_path(const std::string& path, std::string& out)
+{
+  char resolved_buf[PATH_MAX];
+  if (!realpath(path.c_str(), resolved_buf)) return false;
+  out = resolved_buf;
+  return true;
+}
+
+static bool stat_path(const std::string& path, file_info& info)
+{
+  struct stat st;
+  if (stat(path.c_str(), &st) != 0) return false;
+  info.is_dir = S_ISDIR(st.st_mode);
+  info.is_regular = S_ISREG(st.st_mode);
+  info.mtime = st.st_mtime;
+  info.size = static_cast<long long>(st.st_size);
+  return true;
+}
+
 /// Read [offset, offset+length) bytes from fd into buf.
 static bool read_range(int fd, char* buf, off_t offset, size_t length)
 {
@@ -145,6 +237,19 @@ static bool read_range(int fd, char* buf, off_t offset, size_t length)
   return true;
 }
 
+/// Read [offset, offset+length) bytes of the file at @p path into buf.
+static bool read_file_range(const std::string& path, char* buf,
+                            long long offset, size_t length)
+{
+  int fd = open(path.c_str(), O_RDONLY);
+  if (fd < 0) return false;
+  bool ok = read_range(fd, buf, static_cast<off_t>(offset), length);
+  close(fd);
+  return ok;
+}
+
+#endif
+
 // ---------------------------------------------------------------------------
 // Handler factory
 // ---------------------------------------------------------------------------
@@ -154,8 +259,8 @@ http_route_callback make_static_file_handler(std::string url_prefix,
                                              static_file_config cfg)
 {
   // Canonicalise root_dir at registration time so we fail fast on bad config.
-  char canon_buf[PATH_MAX];
-  if (!realpath(root_dir.c_str(), canon_buf)) {
+  std::string canonical_root;
+  if (!resolve_path(root_dir, canonical_root)) {
     LOG(ERROR) << "serve_static: cannot resolve root_dir '" << root_dir
                << "': " << strerror(errno) << "\n";
     return [](http_request_ptr req, const http_route_args&) {
@@ -165,7 +270,6 @@ http_route_callback make_static_file_handler(std::string url_prefix,
   }
 
   // canonical_root always ends with '/' for easy prefix comparison.
-  std::string canonical_root = canon_buf;
   if (canonical_root.back() != '/') canonical_root += '/';
 
   // Normalise prefix: no trailing slash.
@@ -199,18 +303,25 @@ http_route_callback make_static_file_handler(std::string url_prefix,
       return;
     }
 
+#ifdef _WIN32
+    // Reject Windows-only path syntax: '\' separators, and ':' which selects
+    // drive letters or NTFS alternate data streams ("file.txt::$DATA").
+    if (target.find_first_of("\\:") != std::string::npos) {
+      req->response.result(400);
+      req->response.body = "Bad Request";
+      return;
+    }
+#endif
+
     // Build full path: canonical_root + subpath (skip leading '/').
     std::string subpath =
         (!target.empty() && target[0] == '/') ? target.substr(1) : target;
     std::string full_path = canonical_root + subpath;
 
     // ─── ③ Canonicalise and guard against path traversal ─────────────────
-    char resolved_buf[PATH_MAX];
     std::string real_path;
 
-    if (realpath(full_path.c_str(), resolved_buf)) {
-      real_path = resolved_buf;
-    } else {
+    if (!resolve_path(full_path, real_path)) {
       req->response.result(404);
       req->response.body = "Not Found";
       return;
@@ -229,20 +340,20 @@ http_route_callback make_static_file_handler(std::string url_prefix,
     }
 
     // ─── ④ stat() ─────────────────────────────────────────────────────────
-    struct stat st;
-    if (stat(real_path.c_str(), &st) != 0) {
+    file_info st;
+    if (!stat_path(real_path, st)) {
       req->response.result(404);
       req->response.body = "Not Found";
       return;
     }
 
     // ─── ⑤ Directory → index file ────────────────────────────────────────
-    if (S_ISDIR(st.st_mode)) {
+    if (st.is_dir) {
       if (real_path.back() != '/') real_path += '/';
       real_path += cfg.index_file;
 
-      char resolved2[PATH_MAX];
-      if (!realpath(real_path.c_str(), resolved2)) {
+      std::string resolved2;
+      if (!resolve_path(real_path, resolved2)) {
         req->response.result(404);
         req->response.body = "Not Found";
         return;
@@ -256,30 +367,30 @@ http_route_callback make_static_file_handler(std::string url_prefix,
         return;
       }
 
-      if (stat(real_path.c_str(), &st) != 0) {
+      if (!stat_path(real_path, st)) {
         req->response.result(404);
         req->response.body = "Not Found";
         return;
       }
-      if (S_ISDIR(st.st_mode)) {
+      if (st.is_dir) {
         req->response.result(403);
         req->response.body = "Forbidden";
         return;
       }
     }
 
-    if (!S_ISREG(st.st_mode)) {
+    if (!st.is_regular) {
       req->response.result(403);
       req->response.body = "Forbidden";
       return;
     }
 
-    long long mtime = static_cast<long long>(st.st_mtime);
-    long long fsize = static_cast<long long>(st.st_size);
+    long long mtime = static_cast<long long>(st.mtime);
+    long long fsize = st.size;
 
     // ─── ⑥ ETag and Last-Modified (conditional GET) ──────────────────────
     std::string etag_val = make_etag(mtime, fsize);
-    std::string last_modified_val = format_http_date(st.st_mtime);
+    std::string last_modified_val = format_http_date(st.mtime);
 
     if (cfg.enable_etag) {
       std::string inm = std::string(req->headers["If-None-Match"]);
@@ -295,7 +406,7 @@ http_route_callback make_static_file_handler(std::string url_prefix,
       std::string ims_str = std::string(req->headers["If-Modified-Since"]);
       if (!ims_str.empty()) {
         time_t ims = parse_http_date(ims_str);
-        if (ims != static_cast<time_t>(-1) && st.st_mtime <= ims) {
+        if (ims != static_cast<time_t>(-1) && st.mtime <= ims) {
           req->response.result(304);
           req->response.headers.set("Last-Modified", last_modified_val);
           req->response.headers.set("Cache-Control", cfg.cache_control);
@@ -349,17 +460,8 @@ http_route_callback make_static_file_handler(std::string url_prefix,
             long long range_len = range_end - range_start + 1;
             std::string body(static_cast<size_t>(range_len), '\0');
 
-            int fd = open(real_path.c_str(), O_RDONLY);
-            if (fd < 0) {
-              req->response.result(500);
-              req->response.body = "Internal Server Error";
-              return;
-            }
-            bool ok = read_range(fd, &body[0], static_cast<off_t>(range_start),
-                                 static_cast<size_t>(range_len));
-            close(fd);
-
-            if (!ok) {
+            if (!read_file_range(real_path, &body[0], range_start,
+                                 static_cast<size_t>(range_len))) {
               req->response.result(500);
               req->response.body = "Internal Server Error";
               return;
@@ -387,16 +489,8 @@ http_route_callback make_static_file_handler(std::string url_prefix,
     std::string body;
     if (fsize > 0) {
       body.resize(static_cast<size_t>(fsize));
-      int fd = open(real_path.c_str(), O_RDONLY);
-      if (fd < 0) {
-        req->response.result(500);
-        req->response.body = "Internal Server Error";
-        return;
-      }
-      bool ok = read_range(fd, &body[0], 0, static_cast<size_t>(fsize));
-      close(fd);
-
-      if (!ok) {
+      if (!read_file_range(real_path, &body[0], 0,
+                           static_cast<size_t>(fsize))) {
         req->response.result(500);
         req->response.body = "Internal Server Error";
         return;

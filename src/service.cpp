@@ -4,6 +4,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <regex>
+#ifdef _WIN32
+#include <windows.h>
+// (timeapi.h must follow windows.h)
+#include <timeapi.h>
+#endif
 
 #include "aixlog.hpp"
 #include "boost/fiber/all.hpp"
@@ -58,12 +63,27 @@ async_stats service::get_async_stats()
   return stats;
 }
 
+#ifdef _WIN32
+namespace {
+// Windows rounds every timed wait up to the system tick (~15.6ms by default),
+// which would turn the run loop's 100us/5ms idle sleeps and asyik::sleep_for
+// into 15.6ms stalls. Request 1ms timer resolution while a service runs.
+struct timer_resolution_guard {
+  timer_resolution_guard() { timeBeginPeriod(1); }
+  ~timer_resolution_guard() { timeEndPeriod(1); }
+};
+}  // namespace
+#endif
+
 thread_local service_wptr service::active_service;
 void service::run(bool stop_on_complete)
 {
   BOOST_ASSERT_MSG(!stopped,
                    "Re-run already stopped service is not supported, please "
                    "use different thread and create new service!");
+#ifdef _WIN32
+  timer_resolution_guard timer_resolution;
+#endif
 
   service::active_service = shared_from_this();
   fiber fb([as = shared_from_this()]() {
@@ -99,8 +119,6 @@ void service::run(bool stop_on_complete)
       fb.detach();
     }
   });
-
-  std::shared_ptr<boost::asio::io_service::work> work;
 
   // in-thread io_service loop
   // Use adaptive sleep to avoid busy-polling and excessive clock_gettime

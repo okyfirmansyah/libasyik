@@ -52,10 +52,10 @@ TEST_CASE("Test complex async rate limit(achieve qps)")
 {
   auto as = asyik::make_service();
   as->execute([as]() {
-    const int desired_qps = 90;
-    const int num_worker = 8;
-    const int target_quota = 200;
-    const int quota_burst = num_worker + 2;
+    static constexpr int desired_qps = 90;
+    static constexpr int num_worker = 8;
+    static constexpr int target_quota = 200;
+    static constexpr int quota_burst = num_worker + 2;
     auto limiter = asyik::make_rate_limit_memory(as, quota_burst, desired_qps);
 
     std::atomic<int> total_granted(0);
@@ -87,7 +87,13 @@ TEST_CASE("Test complex async rate limit(achieve qps)")
     LOG(INFO) << "total ms=" << stop_ms - start_ms << "\n";
     LOG(INFO) << "total qps=" << current_qps << "\n";
 
+#ifdef _WIN32
+    // Workers pace themselves to exactly desired_qps; Windows sleeps have ~1ms
+    // granularity, so they offer slightly fewer requests than on Linux.
+    REQUIRE(current_qps >= (desired_qps - 3));
+#else
     REQUIRE(current_qps >= (desired_qps - 1));
+#endif
     REQUIRE(current_qps <= (desired_qps + 1));
 
     as->stop();
@@ -104,10 +110,10 @@ TEST_CASE("Test complex async rate limit(contention)")
 {
   auto as = asyik::make_service();
   as->execute([as]() {
-    const int desired_qps = 45;
-    const int num_worker = 16;
-    const int target_quota = 100;
-    const int quota_burst = num_worker + 2;
+    static constexpr int desired_qps = 45;
+    static constexpr int num_worker = 16;
+    static constexpr int target_quota = 100;
+    static constexpr int quota_burst = num_worker + 2;
     auto limiter = asyik::make_rate_limit_memory(as, quota_burst, desired_qps);
 
     std::atomic<int> total_granted(0);
