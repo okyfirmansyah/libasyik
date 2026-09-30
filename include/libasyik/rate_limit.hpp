@@ -51,9 +51,10 @@ class rate_limit : public std::enable_shared_from_this<rate_limit<store>> {
   {
     store& s = static_cast<store&>(*this);
 
-    // get interval from last checkpoit
+    // get interval from last checkpoit (monotonic clock, so wall-clock
+    // adjustments cannot refill buckets; unsigned math handles the wrap)
     uint32_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
+                          std::chrono::steady_clock::now().time_since_epoch())
                           .count();
 
     // get remaining from store

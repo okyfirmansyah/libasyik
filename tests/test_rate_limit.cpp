@@ -29,12 +29,21 @@ TEST_CASE("Test rate limit basic")
     asyik::sleep_for(std::chrono::milliseconds(2200));
     REQUIRE(limiter->get_remaining("get_status") == 100);
     LOG(INFO) << "start checkpoint from async..\n";
+    // Concurrent checkpoints must each consume exactly one token. Use a
+    // limiter that refills only 1 token/s and wait for every async() to
+    // finish, so scheduling delays on a loaded machine can neither refill
+    // tokens nor leave checkpoints pending when the result is checked.
+    auto slow_limiter = asyik::make_rate_limit_memory(as, 100, 1);
+    auto done = std::make_shared<std::atomic<int>>(0);
     for (int i = 0; i < 50; i++)
-      as->async(
-          [limiter, i]() { REQUIRE(limiter->checkpoint("get_status") == 1); });
-    asyik::sleep_for(std::chrono::milliseconds(5));
+      as->async([slow_limiter, done]() {
+        auto granted = slow_limiter->checkpoint("get_status");
+        (*done)++;
+        REQUIRE(granted == 1);
+      });
+    while (*done < 50) asyik::sleep_for(std::chrono::milliseconds(1));
     LOG(INFO) << "done\n";
-    REQUIRE(limiter->get_remaining("get_status") == 50);
+    REQUIRE(slow_limiter->get_remaining("get_status") == 50);
 
     limiter->reset();
     REQUIRE(limiter->get_remaining("get_status") == 100);

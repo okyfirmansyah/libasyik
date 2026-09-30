@@ -201,4 +201,28 @@ TEST_CASE("Testing multithreading")
   as->run();
 }
 
+TEST_CASE("Testing long expiry does not overflow")
+{
+  // 30 days: expiry * 1000 exceeds INT_MAX, which used to wrap negative and
+  // expire every entry immediately
+  auto as = asyik::make_service();
+  auto cache = asyik::make_memcache<int, int, 30 * 24 * 3600>(as);
+  auto cache_mt = asyik::make_memcache_mt<int, int, 30 * 24 * 3600>(as);
+
+  as->execute([cache, cache_mt, as]() {
+    cache->put(1, 11);
+    cache_mt->put(1, 11);
+    asyik::sleep_for(std::chrono::milliseconds(50));
+
+    REQUIRE(cache->get(1) == 11);
+    REQUIRE(cache->at(1) == 11);
+    REQUIRE(cache_mt->get(1) == 11);
+    REQUIRE(cache_mt->at(1) == 11);
+
+    as->stop();
+  });
+
+  as->run();
+}
+
 }  // namespace asyik
