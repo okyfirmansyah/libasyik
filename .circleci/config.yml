@@ -66,17 +66,23 @@ jobs:
          paths:
            - C:/vcpkg-bincache
 
+     # cmake is not on the executor's PATH; use the one vcpkg provides
+     # (prints its path, downloading a portable copy if needed)
      - run:
          name: Configure
          command: |
-           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 \
+           CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+           "$CMAKE" --version
+           "$CMAKE" -S . -B build -G "Visual Studio 17 2022" -A x64 \
              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
              -DLIBASYIK_ENABLE_SOCI=ON
 
      - run:
          name: Build
          no_output_timeout: 30m
-         command: cmake --build build --config Release --target libasyik_test -- -m -v:m
+         command: |
+           CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+           "$CMAKE" --build build --config Release --target libasyik_test -- -m -v:m
 
      # SQL tests need a PostgreSQL server, which the Linux job provides;
      # Windows executors cannot run the Linux postgres container.
