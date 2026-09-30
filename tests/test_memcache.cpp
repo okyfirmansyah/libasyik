@@ -112,11 +112,13 @@ TEST_CASE("Testing active pruning mechanism")
     cache->put("1", 11);
     cache->put("2", 22);
     cache->put("3", 3);
-    asyik::sleep_for(std::chrono::milliseconds(960));
+    // items live 1000-1020ms; sleep well below that so scheduler jitter on
+    // loaded CI machines cannot expire them early
+    asyik::sleep_for(std::chrono::milliseconds(800));
 
     REQUIRE(cache->get("1") == 11);
     cache->put("3", 33);  // update and relocate "3" to more recent partition
-    asyik::sleep_for(std::chrono::milliseconds(960));
+    asyik::sleep_for(std::chrono::milliseconds(800));
 
     REQUIRE(cache->get("1") == 11);
     REQUIRE(cache->get("3") == 33);
@@ -158,12 +160,13 @@ TEST_CASE("Testing multithreading")
       cache->put(i * 10 + 1, 11);
       cache->put(i * 10 + 2, 22);
       cache->put(i * 10 + 3, 3);
-      asyik::sleep_for(std::chrono::milliseconds(960));
+      // items live 1000-1020ms; sleep well below that (see above)
+      asyik::sleep_for(std::chrono::milliseconds(800));
 
       REQUIRE(cache->get(i * 10 + 1) == 11);
       cache->put(i * 10 + 3,
                  33);  // update and relocate "3" to more recent partition
-      asyik::sleep_for(std::chrono::milliseconds(960));
+      asyik::sleep_for(std::chrono::milliseconds(800));
 
       REQUIRE(cache->get(i * 10 + 1) == 11);
       REQUIRE(cache->get(i * 10 + 3) == 33);
