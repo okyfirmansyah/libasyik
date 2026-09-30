@@ -1,10 +1,8 @@
 // Static file serving tests – uses ports 4100, 4101, 4102.
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-
+#include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -29,16 +27,26 @@ std::string write_file(const std::string& dir, const std::string& name,
   return path;
 }
 
-/// Recursively remove a directory tree (uses POSIX shell for simplicity).
-void rmrf(const std::string& path) { ::system(("rm -rf " + path).c_str()); }
-
-/// Create a mkdtemp-style temp directory and return its path.
-std::string make_temp_dir(const char* tmpl = "/tmp/asyik_static_XXXXXX")
+/// Recursively remove a directory tree.
+void rmrf(const std::string& path)
 {
-  std::string t(tmpl);
-  char* p = ::mkdtemp(&t[0]);
-  REQUIRE(p != nullptr);
-  return t;
+  std::error_code ec;
+  std::filesystem::remove_all(std::filesystem::u8path(path), ec);
+}
+
+/// Create a unique directory under the system temp dir and return its path
+/// (with '/' separators).
+std::string make_temp_dir(const char* prefix = "asyik_static_")
+{
+  static std::atomic<unsigned> counter{0};
+  auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    auto p = std::filesystem::temp_directory_path() /
+             (prefix + std::to_string(stamp) + "_" + std::to_string(counter++));
+    if (std::filesystem::create_directory(p)) return p.generic_u8string();
+  }
+  FAIL("could not create temp directory");
+  return {};
 }
 
 }  // anonymous namespace
@@ -120,7 +128,7 @@ TEST_CASE("serve_static: basic GET and MIME types", "[static_file][http]")
   write_file(root, "image.png", "\x89PNG\r\n\x1a\n");
 
   // Sub-directory
-  ::mkdir((root + "/sub").c_str(), 0755);
+  std::filesystem::create_directory(std::filesystem::u8path(root + "/sub"));
   write_file(root + "/sub", "page.html", "<html>Sub</html>");
 
   auto as = asyik::make_service();
@@ -318,17 +326,18 @@ TEST_CASE("serve_static: path traversal is blocked", "[static_file][http]")
   std::string root = make_temp_dir();
   write_file(root, "safe.txt", "safe content");
 
-  // A file outside the root that must never be served.
-  // We can't guarantee /etc/passwd exists but we can check a path
-  // that resolves above root_dir.
-  std::string outside = make_temp_dir("/tmp/asyik_outside_XXXXXX");
+  // A file outside the root that must never be served: a sibling directory
+  // of root, reachable from root_dir via "..".
+  std::string outside = make_temp_dir("asyik_outside_");
   write_file(outside, "secret.txt", "TOP SECRET");
+  std::string outside_name =
+      std::filesystem::u8path(outside).filename().generic_u8string();
 
   auto as = asyik::make_service();
   auto server = asyik::make_http_server(as, "127.0.0.1", 4102);
   server->serve_static("/assets", root);
 
-  as->execute([as, outside]() {
+  as->execute([as, outside_name]() {
     auto base = std::string("http://127.0.0.1:4102");
 
     // Normal request still works.
@@ -336,15 +345,15 @@ TEST_CASE("serve_static: path traversal is blocked", "[static_file][http]")
     REQUIRE(req->response.result() == 200);
 
     // URL-encoded traversal (%2e%2e = ".."):
-    // /assets/%2e%2e/%2e%2e/tmp/asyik_outside_XXXXXX/secret.txt
-    // After percent-decode → /assets/../../tmp/.../secret.txt
-    // → realpath resolves above root → 403.
+    // /assets/%2e%2e%2fasyik_outside_XXXX%2fsecret.txt
+    // After percent-decode → /assets/../asyik_outside_XXXX/secret.txt
+    // → realpath resolves outside root → 403.
     // (The Boost.URL client will send the encoded form to the server.)
-    std::string encoded_traversal = base + "/assets/%2e%2e%2f%2e%2e%2f" +
-                                    outside.substr(1) +  // strip leading '/'
-                                    "%2fsecret.txt";
+    std::string encoded_traversal =
+        base + "/assets/%2e%2e%2f" + outside_name + "%2fsecret.txt";
     req = asyik::http_easy_request(as, "GET", encoded_traversal);
     REQUIRE((req->response.result() == 403 || req->response.result() == 404));
+    REQUIRE(req->response.body.find("TOP SECRET") == std::string::npos);
 
     as->stop();
   });

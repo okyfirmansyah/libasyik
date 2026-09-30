@@ -16,12 +16,10 @@ http_server_ptr<http_stream_type> make_http_server(service_ptr as,
   auto p = std::make_shared<http_server<http_stream_type>>(
       http_server<http_stream_type>::private_{}, as, addr, port);
 
-  int one = 1;
-  setsockopt(p->acceptor->native_handle(), SOL_SOCKET,
-             SO_REUSEADDR | (SO_REUSEPORT * reuse_port), &one, sizeof(one));
+  internal::set_acceptor_reuse_options(*p->acceptor, reuse_port);
 
   p->acceptor->bind(
-      ip::tcp::endpoint(ip::address::from_string(std::string{addr}), port));
+      ip::tcp::endpoint(ip::make_address(std::string{addr}), port));
   p->acceptor->listen();
   p->start_accept(as->get_io_service());
   return p;

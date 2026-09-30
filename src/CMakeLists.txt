@@ -38,7 +38,33 @@ if(LIBASYIK_ENABLE_SOCI)
         target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
         target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
         target_link_libraries(${PROJECT_NAME} SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
+        if(WIN32)
+            # sql.hpp includes SOCI headers without the soci/ prefix; locate
+            # them relative to the imported target (e.g. vcpkg's include/soci)
+            get_target_property(SOCI_INCLUDE_ROOT SOCI::soci_core INTERFACE_INCLUDE_DIRECTORIES)
+            list(GET SOCI_INCLUDE_ROOT 0 SOCI_INCLUDE_ROOT)
+            target_include_directories(${PROJECT_NAME} PUBLIC
+                ${SOCI_INCLUDE_ROOT}/soci
+                ${SOCI_INCLUDE_ROOT}/soci/postgresql
+                ${SOCI_INCLUDE_ROOT}/soci/sqlite3)
+        endif()
     endif()
+endif()
+
+if(WIN32)
+    # Target Windows 10+; keep <windows.h> from defining min/max and the
+    # wingdi ERROR macro (which would turn LOG(ERROR) into LOG(0)).
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        _WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX NOGDI)
+    # winmm: timeBeginPeriod() in service::run()
+    target_link_libraries(${PROJECT_NAME} winmm)
+endif()
+
+if(MSVC)
+    # /bigobj: Beast/Asio templates exceed the default COFF section limit.
+    # /Zc:__cplusplus: report the real standard instead of 199711L.
+    # /utf-8: sources contain non-ASCII characters.
+    target_compile_options(${PROJECT_NAME} PUBLIC /bigobj /Zc:__cplusplus /utf-8)
 endif()
 
 find_package(Threads REQUIRED)

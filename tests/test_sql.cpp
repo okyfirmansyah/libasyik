@@ -8,7 +8,7 @@
 namespace asyik {
 void _TEST_invoke_sql(){};
 
-TEST_CASE("Test case to connect to the test DB")
+TEST_CASE("Test case to connect to the test DB", "[sql]")
 {
   using namespace soci;
   auto as = asyik::make_service();
@@ -78,7 +78,7 @@ TEST_CASE("Test case to connect to the test DB")
   as->run();
 }
 
-TEST_CASE("Test rowset, prepared, execute and fetch")
+TEST_CASE("Test rowset, prepared, execute and fetch", "[sql]")
 {
   using namespace soci;
   auto as = asyik::make_service();
@@ -142,7 +142,7 @@ TEST_CASE("Test rowset, prepared, execute and fetch")
   as->stop();
 }
 
-TEST_CASE("Test transactions")
+TEST_CASE("Test transactions", "[sql]")
 {
   using namespace soci;
   auto as = asyik::make_service();
@@ -236,7 +236,7 @@ TEST_CASE("Test transactions")
   as->run();
 }
 
-TEST_CASE("Test LISTEN/NOTIFY")
+TEST_CASE("Test LISTEN/NOTIFY", "[sql]")
 {
   using namespace soci;
   auto as = asyik::make_service();
@@ -283,7 +283,7 @@ TEST_CASE("Test LISTEN/NOTIFY")
   REQUIRE(got_payload == "hello_from_test");
 }
 
-TEST_CASE("Test LISTEN/NOTIFY multiple threads and channels")
+TEST_CASE("Test LISTEN/NOTIFY multiple threads and channels", "[sql]")
 {
   using namespace soci;
   auto as = asyik::make_service();

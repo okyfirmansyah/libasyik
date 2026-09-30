@@ -838,6 +838,16 @@ TEST_CASE("test manual handling of http requests", "[http]")
   as->run();
 }
 
+#ifdef _WIN32
+TEST_CASE("Test reuse_port is exclusive on Windows", "[http]")
+{
+  // No SO_REUSEPORT on Windows: reuse_port is ignored, and a second acceptor
+  // on the same port must fail instead of silently sharing it.
+  auto as = asyik::make_service();
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4009, true);
+  REQUIRE_THROWS(asyik::make_http_server(as, "127.0.0.1", 4009, true));
+}
+#else
 TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
 {
   std::atomic<bool> stopped;
@@ -924,6 +934,7 @@ TEST_CASE("Test for multithread server(SO_REUSEPORT)", "[http]")
   LOG(INFO) << "testing multithread http server done\n";
   asyik::sleep_for(std::chrono::milliseconds(500));
 }
+#endif
 
 TEST_CASE("Test for multipart", "[http]")
 {
@@ -1203,8 +1214,11 @@ TEST_CASE("Test WS close handling", "[http]")
     } catch (boost::system::system_error& e) {
       // after socker closed, either the handle will no longer valid
       // or being used by other process
+      // (Windows reports WSAECONNABORTED for the same situation)
+      INFO("error code " << e.code().value() << ": " << e.code().message());
       REQUIRE(((e.code() == boost::asio::error::bad_descriptor) ||
-               (e.code() == boost::asio::error::not_connected)));
+               (e.code() == boost::asio::error::not_connected) ||
+               (e.code() == boost::asio::error::connection_aborted)));
     } catch (std::exception& e) {
       LOG(INFO) << "got ws exception, what: " << e.what() << "\n";
       REQUIRE(false);

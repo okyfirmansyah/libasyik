@@ -1,6 +1,6 @@
 <img src="docs/libasyik.png" width=420>
 
-[![okyfirmansyah](https://circleci.com/gh/okyfirmansyah/libasyik.svg?style=shield)](<LINK>) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
+[![Linux CI](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcircleci.com%2Fapi%2Fv2%2Finsights%2Fgh%2Fokyfirmansyah%2Flibasyik%2Fworkflows%2Flinux%3Fbranch%3Dmaster&query=%24.items%5B0%5D.status&label=Linux%20CI&logo=circleci&color=informational&cacheSeconds=300)](https://app.circleci.com/pipelines/github/okyfirmansyah/libasyik?branch=master) [![Windows CI](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcircleci.com%2Fapi%2Fv2%2Finsights%2Fgh%2Fokyfirmansyah%2Flibasyik%2Fworkflows%2Fwindows%3Fbranch%3Dmaster&query=%24.items%5B0%5D.status&label=Windows%20CI&logo=circleci&color=informational&cacheSeconds=300)](https://app.circleci.com/pipelines/github/okyfirmansyah/libasyik?branch=master) [![codecov](https://codecov.io/gh/okyfirmansyah/libasyik/branch/master/graph/badge.svg)](https://codecov.io/gh/okyfirmansyah/libasyik)
 
 **Libasyik** is C++ microframework for rapid building HTTP/REST/Websocket-based service that combine [**boost::asio**](https://www.boost.org/doc/libs/1_73_0/doc/html/boost_asio.html), [**boost::beast**](https://github.com/boostorg/beast), and [**boost::fiber**](https://www.boost.org/doc/libs/1_73_0/libs/fiber/doc/html/index.html) to achieve highly concurrent asynchronous network programming model in an easy synchronous-like, user-threading model(fiber).
 
@@ -156,7 +156,7 @@ void some_handler(asyik::service_ptr as)
 
 ### Requirements
 
- - C++ compiler with >=C++11 support (C++14 or C++17 is recommended, tested with GCC 7.5.0)
+ - C++ compiler with >=C++11 support (C++14 or C++17 is recommended, tested with GCC 7.5.0 on Linux and MSVC 2022 on Windows)
  - Boost library with Boost::context, Boost::fiber, and Boost::asio(Boost version 1.81.0 or above recommended)
  - CMake > 3.12
  - SOCI with SQLite and PostgreSQL backend and required low level libraries
@@ -177,6 +177,24 @@ After all environment requirements demonstrated in [Dockerfile](Dockerfile) are 
  make -j4
  make install
 ```
+### Building on Windows (MSVC + vcpkg)
+
+Tested with Visual Studio 2022 (MSVC x64) and Boost 1.90 from [vcpkg](https://vcpkg.io):
+
+```
+vcpkg install boost-fiber boost-context boost-beast boost-asio boost-url boost-date-time boost-atomic boost-any boost-convert boost-regex boost-algorithm boost-optional openssl --triplet x64-windows
+vcpkg install "soci[postgresql,sqlite3]" --triplet x64-windows   # only if SOCI support is desired
+
+git submodule update --init --recursive
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=<vcpkg-root>/scripts/buildsystems/vcpkg.cmake -DLIBASYIK_ENABLE_SOCI=OFF
+cmake --build build --config Release
+```
+
+Windows-specific notes:
+ - `reuse_port` (`SO_REUSEPORT`) has no Windows equivalent. It is ignored with a warning, and listeners bind with `SO_EXCLUSIVEADDRUSE`, so a second server on the same port fails with "address in use" instead of silently sharing it. Use a single acceptor per port.
+ - While a service runs, it requests 1ms system timer resolution (`timeBeginPeriod(1)`). Without it, Windows rounds every sleep and timed wait up to about 15.6ms.
+ - libasyik defines `WIN32_LEAN_AND_MEAN`, `NOMINMAX`, `NOGDI` and `_WIN32_WINNT=0x0A00` for itself and for targets that link it. `NOGDI` keeps `<windows.h>` from defining an `ERROR` macro that would break `LOG(ERROR)`.
+
 After that, Libasyik is now ready to be included in new project.
 As example use following CMakeLists.txt template to invoke Libasyik using **find_package()**:
 ```

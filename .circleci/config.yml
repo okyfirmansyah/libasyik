@@ -1,21 +1,102 @@
 version: 2.1
 orbs:
  codecov: codecov/codecov@1.0.2
+ win: circleci/windows@5.0
 jobs:
- build:  
+ build:
    machine: true
    steps:
      - checkout
-     
+
      # run test postgres
-     - run: docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine  
-     
+     - run: docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine
+
      # build the application image
-     - run: docker build . -t test-docker --build-arg DOCKER_TYPE=TEST 
-      
+     - run: docker build . -t test-docker --build-arg DOCKER_TYPE=TEST
+
      # run test app
      - run: docker run -it --rm --network=host -v ${PWD}/coverage:/mnt/coverage test-docker bash /usr/local/libasyik/tests/test_and_coverage.sh
 
      - codecov/upload:
          file: coverage/libasyik_test.info
 
+ build-windows:
+   executor:
+     name: win/server-2022
+     shell: bash.exe
+   environment:
+     # Pinned vcpkg commit (Boost 1.90, OpenSSL 3, SOCI 4.0.3). Bump it
+     # together with the cache keys below.
+     VCPKG_COMMIT: 58950f88544e4637524dbd6a01d0317cf4cb77fc
+     VCPKG_ROOT: C:/vcpkg-ci
+     VCPKG_DEFAULT_BINARY_CACHE: C:/vcpkg-bincache
+     VCPKG_DISABLE_METRICS: 1
+   steps:
+     - checkout
+     - run: git submodule update --init --recursive
+
+     - run:
+         name: Bootstrap vcpkg
+         command: |
+           git init -q "$VCPKG_ROOT"
+           cd "$VCPKG_ROOT"
+           git fetch -q --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_COMMIT"
+           git checkout -q FETCH_HEAD
+           ./bootstrap-vcpkg.bat -disableMetrics
+           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+     # vcpkg binary cache: without it every run rebuilds Boost/OpenSSL/SOCI
+     # from source (~30 min)
+     - restore_cache:
+         keys:
+           - vcpkg-bin-v1-58950f88-{{ checksum ".circleci/config.yml" }}
+           - vcpkg-bin-v1-58950f88-
+
+     - run:
+         name: Install dependencies
+         no_output_timeout: 60m
+         command: |
+           "$VCPKG_ROOT/vcpkg.exe" install --triplet x64-windows \
+             boost-fiber boost-context boost-beast boost-asio boost-url \
+             boost-date-time boost-atomic boost-any boost-convert boost-regex \
+             boost-algorithm boost-optional openssl "soci[postgresql,sqlite3]"
+
+     - save_cache:
+         key: vcpkg-bin-v1-58950f88-{{ checksum ".circleci/config.yml" }}
+         paths:
+           - C:/vcpkg-bincache
+
+     # cmake is not on the executor's PATH; use the one vcpkg provides
+     # (prints its path, downloading a portable copy if needed)
+     - run:
+         name: Configure
+         command: |
+           CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+           "$CMAKE" --version
+           "$CMAKE" -S . -B build -G "Visual Studio 17 2022" -A x64 \
+             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+             -DLIBASYIK_ENABLE_SOCI=ON
+
+     - run:
+         name: Build
+         no_output_timeout: 30m
+         command: |
+           CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+           "$CMAKE" --build build --config Release --target libasyik_test -- -m -v:m
+
+     # SQL tests need a PostgreSQL server, which the Linux job provides;
+     # Windows executors cannot run the Linux postgres container.
+     - run:
+         name: Test
+         no_output_timeout: 20m
+         command: ./build/tests/Release/libasyik_test.exe "~[sql]" --durations yes
+
+# One workflow per platform, so each gets its own README status badge
+# (CircleCI reports status per workflow, not per job).
+workflows:
+ linux:
+   jobs:
+     - build
+ windows:
+   jobs:
+     - build-windows

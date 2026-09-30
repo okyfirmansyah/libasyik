@@ -1,5 +1,7 @@
 
 #include <boost/asio/ip/udp.hpp>
+#include <chrono>
+#include <thread>
 
 #include "catch2/catch.hpp"
 #include "libasyik/asyik_round_robin.hpp"
@@ -177,7 +179,7 @@ TEST_CASE("execute async", "[service]")
 
   as->async(
         [&i](int inp) {
-          usleep(100);
+          std::this_thread::sleep_for(std::chrono::microseconds(100));
           i = inp;
         },
         10)
@@ -185,21 +187,21 @@ TEST_CASE("execute async", "[service]")
 #if __cplusplus >= 201402L
   as->async(
       [](auto& i) -> void {
-        usleep(0);
+        std::this_thread::sleep_for(std::chrono::microseconds(0));
         i++;
       },
       i);
 #else
   as->async(
       [](std::atomic<int>& i) -> void {
-        usleep(0);
+        std::this_thread::sleep_for(std::chrono::microseconds(0));
         i++;
       },
       i);
 #endif
   as->async(
         [&i](string_view s, const std::string s2) -> void {
-          usleep(130);
+          std::this_thread::sleep_for(std::chrono::microseconds(130));
           int k = i + s.length() + s2.length();
           i = k;
         },
@@ -218,7 +220,8 @@ TEST_CASE("execute async with return value", "[service]")
 
   std::string s = as->async(
                         [](int inp) {
-                          usleep(100);
+                          std::this_thread::sleep_for(
+                              std::chrono::microseconds(100));
                           return std::to_string(inp);
                         },
                         10)

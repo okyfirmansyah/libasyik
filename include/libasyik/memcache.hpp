@@ -1,7 +1,11 @@
 #ifndef LIBASYIK_MEMCACHE_HPP
 #define LIBASYIK_MEMCACHE_HPP
 
+#include <algorithm>
 #include <boost/fiber/mutex.hpp>
+#include <chrono>
+#include <cstdint>
+#include <map>
 #include <memory>
 
 #include "common.hpp"
@@ -43,7 +47,6 @@ class memcache : public std::enable_shared_from_this<
 
   void put(const Key& k, T&& v)
   {
-    using namespace std::chrono;
     typename thread_policy::guard_type t(mtx);
 
     // delete old key
@@ -51,10 +54,8 @@ class memcache : public std::enable_shared_from_this<
       m.second.erase(k);
     }
 
-    uint32_t current_ms = duration_cast<std::chrono::milliseconds>(
-                              system_clock::now().time_since_epoch())
-                              .count();
-    uint32_t expiry_at = current_ms + expiry * 1000;
+    int64_t current_ms = now_ms();
+    int64_t expiry_at = current_ms + expiry_ms;
 
     if ((map_list.begin() != map_list.end()) &&
         (map_list.begin()->first >= expiry_at)) {
@@ -63,7 +64,7 @@ class memcache : public std::enable_shared_from_this<
     {
       std::map<Key, T> m;
       m.emplace(k, std::forward<T>(v));
-      map_list[expiry_at + (expiry * 1000 / segments)] = std::move(m);
+      map_list[expiry_at + segment_ms] = std::move(m);
     }
   }
 
@@ -85,10 +86,7 @@ class memcache : public std::enable_shared_from_this<
 
   T& at(const Key& k)
   {
-    using namespace std::chrono;
-    uint32_t current_ms = duration_cast<std::chrono::milliseconds>(
-                              system_clock::now().time_since_epoch())
-                              .count();
+    int64_t current_ms = now_ms();
 
     typename thread_policy::guard_type t(mtx);
     for (auto& m : map_list) {
@@ -104,17 +102,13 @@ class memcache : public std::enable_shared_from_this<
 
   T& get(const Key& k)
   {
-    using namespace std::chrono;
-
     typename thread_policy::guard_type t(mtx);
     prune();
 
     for (auto& m : map_list) {
       if (m.second.count(k)) {
-        uint32_t current_ms = duration_cast<std::chrono::milliseconds>(
-                                  system_clock::now().time_since_epoch())
-                                  .count();
-        uint32_t expiry_at = current_ms + expiry * 1000;
+        int64_t current_ms = now_ms();
+        int64_t expiry_at = current_ms + expiry_ms;
 
         if ((map_list.begin() != map_list.end()) &&
             (map_list.begin()->first >= expiry_at)) {
@@ -128,9 +122,9 @@ class memcache : public std::enable_shared_from_this<
           std::map<Key, T> c;
           c.emplace(k, std::move(m.second.at(k)));
 
-          map_list[expiry_at + (expiry * 1000 / segments)] = std::move(c);
+          map_list[expiry_at + segment_ms] = std::move(c);
           m.second.erase(k);
-          return map_list.at(expiry_at + (expiry * 1000 / segments)).at(k);
+          return map_list.at(expiry_at + segment_ms).at(k);
         }
       }
     }
@@ -138,12 +132,23 @@ class memcache : public std::enable_shared_from_this<
   }
 
  private:
-  void prune()
+  // Entry lifetime and partition width in ms (64-bit: expiry * 1000 overflows
+  // int for lifetimes above ~24.8 days)
+  static constexpr int64_t expiry_ms = int64_t{expiry} * 1000;
+  static constexpr int64_t segment_ms = expiry_ms / segments;
+
+  // Milliseconds from a monotonic clock: wall-clock adjustments cannot
+  // expire or extend entries, and 64 bits never wrap.
+  static int64_t now_ms()
   {
     using namespace std::chrono;
-    uint32_t current_ms = duration_cast<std::chrono::milliseconds>(
-                              system_clock::now().time_since_epoch())
-                              .count();
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch())
+        .count();
+  }
+
+  void prune()
+  {
+    int64_t current_ms = now_ms();
 
     for (auto iter = map_list.begin(); iter != map_list.end();) {
       if (current_ms > iter->first)
@@ -153,7 +158,7 @@ class memcache : public std::enable_shared_from_this<
     }
   }
   typename thread_policy::template atomic_type<bool> closed;
-  std::map<uint32_t, std::map<Key, T>, std::greater<int>> map_list;
+  std::map<int64_t, std::map<Key, T>, std::greater<int64_t>> map_list;
   typename thread_policy::mutex_type mtx;
 
   template <class k, class t, int e, int s>
@@ -164,6 +169,28 @@ class memcache : public std::enable_shared_from_this<
       memcache<k, t, e, s, multi_thread<boost::fibers::mutex>>>
   make_memcache_mt(service_ptr as);
 };
+
+namespace internal {
+// Background pruning loop: calls step(due) until it returns false (cache
+// destroyed), with due == true every expiry/segments. Sleeps in slices of at
+// most 100ms because a sleeping fiber only notices service stop when its sleep
+// returns; a single long sleep (3 days for a 30-day expiry) would block
+// service shutdown that long.
+template <int expiry, int segments, typename Step>
+void prune_periodically(Step&& step)
+{
+  using namespace std::chrono;
+  const milliseconds interval(int64_t{expiry} * 1000 / segments);
+  const milliseconds slice = (std::min)(interval, milliseconds(100));
+  auto next_prune = steady_clock::now() + interval;
+  while (true) {
+    asyik::sleep_for(slice);
+    bool due = steady_clock::now() >= next_prune;
+    if (due) next_prune = steady_clock::now() + interval;
+    if (!step(due)) break;
+  }
+}
+}  // namespace internal
 
 template <class Key, class T, int expiry, int segments = 10>
 inline std::shared_ptr<memcache<Key, T, expiry, segments, single_thread>>
@@ -176,17 +203,12 @@ make_memcache(service_ptr as)
   as->execute(
       [c = std::weak_ptr<memcache<Key, T, expiry, segments, single_thread>>(
            cache)]() {
-        while (1) {
-          std::shared_ptr<memcache<Key, T, expiry, segments, single_thread>>
-              cache;
-          asyik::sleep_for(
-              std::chrono::milliseconds((expiry * 1000) / segments));
-          if ((cache = c.lock())) {
-            cache->prune();
-            cache.reset();
-          } else
-            break;
-        }
+        internal::prune_periodically<expiry, segments>([&c](bool due) {
+          auto cache = c.lock();
+          if (!cache) return false;
+          if (due) cache->prune();
+          return true;
+        });
       });
   return cache;
 }
@@ -203,19 +225,16 @@ make_memcache_mt(service_ptr as)
   as->async([c = std::weak_ptr<memcache<Key, T, expiry, segments,
                                         multi_thread<boost::fibers::mutex>>>(
                  cache)]() {
-    while (1) {
-      std::shared_ptr<memcache<Key, T, expiry, segments,
-                               multi_thread<boost::fibers::mutex>>>
-          cache;
-      asyik::sleep_for(std::chrono::milliseconds((expiry * 1000) / segments));
-      if ((cache = c.lock())) {
+    internal::prune_periodically<expiry, segments>([&c](bool due) {
+      auto cache = c.lock();
+      if (!cache) return false;
+      if (due) {
+        // guard is released before the (possibly last) reference to cache
         typename multi_thread<boost::fibers::mutex>::guard_type t(cache->mtx);
-
         cache->prune();
-        cache.reset();
-      } else
-        break;
-    }
+      }
+      return true;
+    });
   });
   return cache;
 }
