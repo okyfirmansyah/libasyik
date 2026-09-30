@@ -91,8 +91,12 @@ jobs:
          no_output_timeout: 20m
          command: ./build/tests/Release/libasyik_test.exe "~[sql]" --durations yes
 
+# One workflow per platform, so each gets its own README status badge
+# (CircleCI reports status per workflow, not per job).
 workflows:
- build:
+ linux:
    jobs:
      - build
+ windows:
+   jobs:
      - build-windows
