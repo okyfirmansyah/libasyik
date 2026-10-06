@@ -2,12 +2,31 @@ GENERAL/Service:
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
 
 HTTP:
--delete SSL verify_none
--Support SSL client custom context(for e.g custom certificate, paths, callbacks)
--SSL detailed error response
 -http test network negative case(host not found, dns not found, no connection, timeouts)
 -ability for http/s server to override nefative handling(route not found, payload too large, etc)
 -make http full client(separate connection and request)
+-server stops accepting for good after a single async_accept error
+ (e.g. EMFILE); re-arm the accept loop on transient errors
+-plain HTTP server has no idle/read timeout for keep-alive connections
+-clients disconnecting right after the TLS handshake are logged at WARNING
+ (Windows reports them as resets); lower to DEBUG
+
+TLS (phases 0-2 done: verified clients, secure server defaults, timeouts; see docs/tls.md):
+-phase 3, server features:
+  -certificate hot reload: atomically swappable tls::server_context, new
+   connections pick up the new certificate, existing ones keep the old one
+  -mutual TLS on the server: client_auth none/optional/required + client CA
+   in tls::server_config
+  -expose TLS details to handlers (req->tls_info(): version, cipher, SNI,
+   ALPN, peer certificate subject/SANs/fingerprint, verified flag)
+  -SNI multi-certificate virtual hosting (server_config.sni_certs)
+  -optional: answer plain HTTP on the HTTPS port with 400 or a redirect
+-phase 4, client performance:
+  -TLS session resumption cache in tls::client_context (per host:port,
+   including TLS 1.3 tickets)
+  -connection reuse/pooling is the bigger win (see "make http full client")
+-windows: document that a fresh machine only trusts roots already in its
+ certificate store (use ca_file for others)
 
 WEBSOCKET:
 -ability for websocket to add custom header

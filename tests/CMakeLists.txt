@@ -10,7 +10,8 @@ if(NOT MSVC)
 endif()
 
 add_executable(${PROJECT_NAME} test.cpp)
-target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memcache.cpp test_rate_limit.cpp test_static.cpp)
+target_sources(${PROJECT_NAME} PRIVATE test_http.cpp test_service.cpp test_memcache.cpp test_rate_limit.cpp test_static.cpp test_tls.cpp test_tls_server.cpp)
+target_compile_definitions(${PROJECT_NAME} PRIVATE LIBASYIK_TEST_CERT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/certs")
 
 if(LIBASYIK_ENABLE_SOCI)
     target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp)

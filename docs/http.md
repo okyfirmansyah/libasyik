@@ -117,6 +117,32 @@ int main()
  }
 ```
 
+##### HTTPS and certificate verification
+`https://` requests verify the server certificate against the system trust
+store and check that it matches the URL host. A server with a self-signed,
+expired or mismatching certificate makes the request throw
+`asyik::tls_verify_error`.
+
+To trust a private CA (or change other TLS settings), build a
+`tls::client_context` once and pass it per call, or set it for the whole
+service:
+
+```c++
+asyik::tls::client_config cfg;
+cfg.ca_file = "/etc/myapp/internal-ca.pem";
+auto tls_ctx = asyik::tls::make_client_context(cfg);
+
+// per call: (service, tls context, timeout ms, method, url, body, headers)
+auto req = asyik::http_easy_request(as, tls_ctx, 10000, "GET",
+                                    "https://internal.example/api", "", {});
+
+// or for every request made through this service
+as->set_tls_client_context(tls_ctx);
+```
+
+See [TLS](tls.md) for all client settings, client certificates and error
+types.
+
 #### Websockets Server
 ```c++
 void main()
@@ -171,6 +197,13 @@ void main()
 }
 ```
 
+`wss://` connections verify the server certificate the same way as HTTPS
+requests. To use custom TLS settings, pass a `tls::client_context`:
+
+```c++
+auto ws = asyik::make_websocket_connection(as, tls_ctx, "wss://internal.example/ws");
+```
+
 #### Sending/Reading Binary Buffer
 Libasyik support basic sending/reading binary buffer in websocket connection as std::vector<uint8_t>
 ```c++
@@ -201,6 +234,36 @@ void main()
 
 #### Create SSL Server
 To create HTTPS server, use the same templates but now using **make_https_server()**, for e.g:
+
+```c++
+#include "libasyik/service.hpp"
+#include "libasyik/http.hpp"
+
+int main()
+{
+  auto as = asyik::make_service();
+
+  asyik::tls::server_config cfg;
+  cfg.cert_file = "server.crt";  // leaf + intermediates
+  cfg.key_file = "server.key";
+
+  auto server = asyik::make_https_server(as, cfg, "0.0.0.0", 443);
+
+  server->on_http_request("/hello", "GET", [](auto req, auto args) {
+    req->response.body = "hello over TLS";
+    req->response.result(200);
+  });
+
+  as->run();
+}
+```
+
+`tls::server_config` applies secure defaults (TLS 1.2+, forward-secret
+ciphers, ALPN); see [TLS](tls.md#server) for all settings and the handshake
+and shutdown timeouts.
+
+HTTPS clients verify server certificates by default. See [TLS](tls.md) for
+client settings such as trusting a private CA.
 
 #### Route Registration: Tags vs Raw Regex
 
@@ -255,39 +318,6 @@ server->on_http_request("/api/<string>", "GET", [](auto req, auto args) {
 `serve_static()` last so it only handles requests that no explicit route
 matched.
 
-```c++
-#include "libasyik/service.hpp"
-#include "libasyik/http.hpp"
-
-int main()
-{
-    auto as = asyik::make_service();
-
-    // The SSL context is required, and holds certificates
-    ssl::context ctx{ssl::context::tlsv12};
-
-    // This holds the self-signed certificate used by the server
-    load_server_certificate(ctx);
-
-    auto server = asyik::make_https_server(as, std::move(ctx), "127.0.0.1", 443);
-
-    server->on_websocket("/ws", [](auto ws, auto args) {
-      auto s = ws->get_string();
-      ws->send_string(s);
-
-      ws->close(websocket_close_code::normal, "closed normally");
-    });
-
-    server->on_http_request("/", "GET", [](auto req, auto args) {
-      req->response.body = "hello world";
-      req->response.result(200);
-    });
-    
-    as->run();
-}
-```
-Please take a look at [Beast's example](https://www.boost.org/doc/libs/1_73_0/libs/beast/example/common/server_certificate.hpp) for an example on how to perform SSL context creation/**load_server_certificate()**.
-
 ### Create multi-thread server
 Libasyik use **explicitly single thread** model, meaning an instance of `asyik::service` used to create HTTP server instance will handles incoming connection by the same thread the `as->run()` is called.
 
@@ -317,6 +347,33 @@ int main()
 }
 ```
 Obviously, since all HTTP handler now run in one of multiple threads, any access to shared variables or memory regions should be protected with synchronizations.
+
+For HTTPS, build the TLS context once and share it between the threads'
+servers (it is thread-safe and loads the certificate only once):
+
+```c++
+asyik::tls::server_config cfg;
+cfg.cert_file = "server.crt";
+cfg.key_file = "server.key";
+auto tls_ctx = asyik::tls::make_server_context(cfg);
+
+for (int i = 0; i < 8; i++) {
+  std::thread t([tls_ctx]() {
+    auto as = asyik::make_service();
+    auto server = asyik::make_https_server(as, tls_ctx, "0.0.0.0", 443, true);
+    ...
+    as->run();
+  });
+  t.detach();
+}
+```
+
+#### Stopping a Server
+`server->close()` stops accepting new connections and closes every active
+connection, including WebSocket connections whose handler is still running
+(their pending reads and writes throw, so the handler can return). A
+WebSocket that a handler has already handed over to other code (stored the
+`websocket_ptr` and returned) is not affected.
 
 #### Set Incoming Request Body and Header Size Limits
 To protect against unbounded incoming data size(overflow or out of memory error), by default, incoming request header and body size are set to both 1MB each.  You can override these two settings using following:
@@ -432,7 +489,7 @@ server->serve_static("/static",     "/var/www/html");
 server->serve_static("/downloads",  "/srv/files");
 
 // Works the same way on an HTTPS server
-auto https_server = asyik::make_https_server(as, std::move(ssl_ctx), "0.0.0.0", 443);
+auto https_server = asyik::make_https_server(as, tls_cfg, "0.0.0.0", 443);  // tls::server_config
 https_server->serve_static("/static", "/var/www/html");
 ```
 

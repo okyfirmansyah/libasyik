@@ -237,9 +237,39 @@ auto req = asyik::http_easy_request(as, "POST",
 // With timeout in milliseconds
 auto req = asyik::http_easy_request(as, 5000, "GET", "http://example.com/slow");
 
-// HTTPS works transparently
+// HTTPS: the server certificate and host name are verified by default;
+// failures throw asyik::tls_verify_error
 auto req = asyik::http_easy_request(as, "GET", "https://example.com/secure");
+
+// Private CA / client certificate / other TLS settings: build a context once
+asyik::tls::client_config cfg;
+cfg.ca_file = "/etc/myapp/internal-ca.pem";
+auto tls_ctx = asyik::tls::make_client_context(cfg);
+auto req = asyik::http_easy_request(as, tls_ctx, 5000, "GET",
+    "https://internal.example/api", "", {});
+as->set_tls_client_context(tls_ctx);   // or: default for this service
 ```
+
+Never use `tls::client_config::insecure()` outside tests. See `docs/tls.md`.
+
+## HTTPS Server
+
+```cpp
+asyik::tls::server_config cfg;           // secure defaults (TLS 1.2+, ALPN, ...)
+cfg.cert_file = "fullchain.pem";
+cfg.key_file = "privkey.pem";
+auto server = asyik::make_https_server(as, cfg, "0.0.0.0", 443);
+
+// Share one context across SO_REUSEPORT servers in several threads
+auto tls_ctx = asyik::tls::make_server_context(cfg);
+auto server2 = asyik::make_https_server(as2, tls_ctx, "0.0.0.0", 443, true);
+
+server->set_tls_handshake_timeout(std::chrono::seconds(10));  // default
+server->set_tls_shutdown_timeout(std::chrono::seconds(2));    // default
+```
+
+`server->close()` closes all active connections, including WebSockets whose
+handler is still running.
 
 ## WebSocket
 
@@ -263,6 +293,8 @@ server->on_websocket("/ws/<string>", [](auto ws, auto args) {
 #include "libasyik/http.hpp"
 
 auto ws = asyik::make_websocket_connection(as, "ws://127.0.0.1:8080/ws/room1");
+// wss:// verifies certificates like HTTPS; custom settings:
+// make_websocket_connection(as, tls_ctx, "wss://host/ws");
 ws->send_string("hello");
 auto reply = ws->get_string();
 ws->close(asyik::websocket_close_code::normal, "bye");
@@ -384,7 +416,10 @@ io_error
 ├── network_error
 │   ├── network_timeout_error
 │   ├── network_unreachable_error
-│   └── network_expired_error
+│   ├── network_expired_error
+│   └── tls_error
+│       └── tls_handshake_error
+│           └── tls_verify_error   ← verify_result() = X509_V_ERR_* code
 ├── file_error
 └── resource_error
 
@@ -430,8 +465,8 @@ target_link_libraries(my_service libasyik Boost::fiber Boost::context Threads::T
 # Optional: enable SOCI database support
 # SET(LIBASYIK_ENABLE_SOCI ON)
 
-# Optional: enable SSL server
-# SET(LIBASYIK_ENABLE_SSL_SERVER ON)
+# HTTPS server support is ON by default; turn it off to drop it
+# SET(LIBASYIK_ENABLE_SSL_SERVER OFF)
 ```
 
 ## Required includes by feature
@@ -440,6 +475,7 @@ target_link_libraries(my_service libasyik Boost::fiber Boost::context Threads::T
 |---------|---------|
 | Service, execute, async, sleep_for | `"libasyik/service.hpp"` |
 | HTTP server, client, websocket | `"libasyik/http.hpp"` |
+| TLS settings (`tls::client_config`, `tls::server_config`) | `"libasyik/tls.hpp"` (included by `http.hpp`) |
 | SQL (PostgreSQL, SQLite) | `"libasyik/sql.hpp"` |
 | Rate limiting | `"libasyik/http.hpp"` (or `"libasyik/rate_limit.hpp"`) |
 | In-memory cache | `"libasyik/memcache.hpp"` |

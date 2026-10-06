@@ -25,6 +25,7 @@
 #include "internal/asio_internal.hpp"
 #include "internal/digestauth.hpp"
 #include "service.hpp"
+#include "tls.hpp"
 
 // Include modular headers
 #include "http_client.hpp"
@@ -225,8 +226,9 @@ boost::fibers::future<size_t> handle_client_request_response(
 
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
-    service_ptr as, int timeout_ms, string_view method, string_view url,
-    D&& data, const std::map<string_view, string_view>& headers, F&& f,
+    service_ptr as, const tls::client_context_ptr& tls_ctx, int timeout_ms,
+    string_view method, string_view url, D&& data,
+    const std::map<string_view, string_view>& headers, F&& f,
     const digest_authenticator* auth)
 {
   http_url_scheme scheme;
@@ -272,23 +274,18 @@ http_request_ptr http_easy_request_multipart(
             .get();
 
     if (scheme.is_ssl()) {
-      // The SSL context is required, and holds certificates
-      ssl::context ctx(ssl::context::tlsv12_client);
-
-      // This holds the root certificate used for verification
-      // load_root_certificates(ctx);
-
-      ctx.set_default_verify_paths();
-      ctx.set_verify_mode(ssl::verify_none);  //!!!
+      // Declared before the stream so it outlives it.
+      tls::client_context_ptr ctx =
+          tls_ctx ? tls_ctx : as->get_tls_client_context();
 
       beast::ssl_stream<beast::tcp_stream> stream(
-          asio::make_strand(as->get_io_service()), ctx);
+          asio::make_strand(as->get_io_service()), ctx->native());
 
       stream.next_layer().expires_after(std::chrono::milliseconds(timeout_ms));
 
       internal::socket::async_connect(beast::get_lowest_layer(stream), results)
           .get();
-      internal::ssl::async_handshake(stream, ssl::stream_base::client).get();
+      internal::tls::client_handshake(stream, *ctx, scheme.host());
 
       boost::fibers::future<size_t> is_write_done;
       try {
@@ -297,9 +294,9 @@ http_request_ptr http_easy_request_multipart(
       } catch (digest_authenticator& auth) {
         LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
 
-        req = http_easy_request_multipart(as, timeout_ms, method, url,
-                                          std::forward<D>(data), headers,
-                                          std::forward<F>(f), &auth);
+        req = http_easy_request_multipart(
+            as, tls_ctx, timeout_ms, method, url, std::forward<D>(data),
+            headers, std::forward<F>(f), &auth);
       }
       try {
         is_write_done.get();
@@ -325,9 +322,9 @@ http_request_ptr http_easy_request_multipart(
       } catch (digest_authenticator& auth) {
         LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
 
-        req = http_easy_request_multipart(as, timeout_ms, method, url,
-                                          std::forward<D>(data), headers,
-                                          std::forward<F>(f), &auth);
+        req = http_easy_request_multipart(
+            as, tls_ctx, timeout_ms, method, url, std::forward<D>(data),
+            headers, std::forward<F>(f), &auth);
       }
 
       beast::error_code ec;
@@ -345,6 +342,17 @@ http_request_ptr http_easy_request_multipart(
   } else
     return nullptr;
 };
+
+template <typename D, typename F>
+http_request_ptr http_easy_request_multipart(
+    service_ptr as, int timeout_ms, string_view method, string_view url,
+    D&& data, const std::map<string_view, string_view>& headers, F&& f,
+    const digest_authenticator* auth)
+{
+  return http_easy_request_multipart(as, nullptr, timeout_ms, method, url,
+                                     std::forward<D>(data), headers,
+                                     std::forward<F>(f), auth);
+}
 
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
@@ -374,11 +382,26 @@ http_request_ptr http_easy_request_multipart(service_ptr as, string_view method,
 
 template <typename D>
 http_request_ptr http_easy_request(
+    service_ptr as, const tls::client_context_ptr& tls_ctx, int timeout_ms,
+    string_view method, string_view url, D&& data,
+    const std::map<string_view, string_view>& headers)
+{
+  return http_easy_request_multipart(
+      as, tls_ctx, timeout_ms, method, url, std::forward<D>(data), headers,
+      [](http_request_ptr req) {
+        throw asyik::unexpected_error(
+            "could not handle multipart response using http_easy_request(). "
+            "Use http_easy_request_multipart() instead");
+      });
+}
+
+template <typename D>
+http_request_ptr http_easy_request(
     service_ptr as, int timeout_ms, string_view method, string_view url,
     D&& data, const std::map<string_view, string_view>& headers)
 {
   return http_easy_request_multipart(
-      as, timeout_ms, method, url, std::forward<D>(data), headers,
+      as, nullptr, timeout_ms, method, url, std::forward<D>(data), headers,
       [](http_request_ptr req) {
         throw asyik::unexpected_error(
             "could not handle multipart response using http_easy_request(). "
@@ -403,23 +426,40 @@ http_request_ptr http_easy_request(service_ptr as, string_view method,
 };
 
 template <>
-inline void http_connection<http_stream_type>::handshake_if_ssl()
+inline void http_connection<http_stream_type>::handshake_if_ssl(
+    std::chrono::milliseconds)
 {}
 
 template <>
-inline void http_connection<https_stream_type>::handshake_if_ssl()
+inline void http_connection<https_stream_type>::handshake_if_ssl(
+    std::chrono::milliseconds timeout)
 {
+  auto& tcp_layer = beast::get_lowest_layer(stream);
+  if (timeout.count() > 0) tcp_layer.expires_after(timeout);
   internal::ssl::async_handshake(stream, ssl::stream_base::server).get();
+  tcp_layer.expires_never();
 }
 
 template <>
 inline void http_connection<http_stream_type>::shutdown_ssl()
 {}
 
+// Sends close_notify and waits (bounded) for the client's. Never throws: many
+// clients just drop the connection, which is fine at this point.
 template <>
 inline void http_connection<https_stream_type>::shutdown_ssl()
 {
-  internal::ssl::async_shutdown(stream).get();
+  auto& tcp_layer = beast::get_lowest_layer(stream);
+  if (tls_shutdown_timeout.count() > 0)
+    tcp_layer.expires_after(tls_shutdown_timeout);
+  try {
+    internal::ssl::async_shutdown(stream).get();
+  } catch (std::exception& e) {
+    LOG(DEBUG) << "TLS shutdown with " << remote_endpoint
+               << " did not complete cleanly: " << e.what() << "\n";
+  }
+  boost::system::error_code ec;
+  tcp_layer.socket().close(ec);
 }
 
 template <typename StreamType>
@@ -427,11 +467,13 @@ void http_connection<StreamType>::start()
 {
   if (auto server = http_server.lock()) {
     if (auto service = server->service.lock()) {
+      tls_shutdown_timeout = server->get_tls_shutdown_timeout();
       service->execute([p = this->shared_from_this(),
                         req_pool = server->req_pool_,
                         body_limit = server->get_request_body_limit(),
-                        header_limit =
-                            server->get_request_header_limit()](void) {
+                        header_limit = server->get_request_header_limit(),
+                        handshake_timeout =
+                            server->get_tls_handshake_timeout()](void) {
         // flag to ignore eos error since work has been
         // done anyway
         bool safe_to_close = false;
@@ -440,7 +482,16 @@ void http_connection<StreamType>::start()
           ip::tcp::no_delay option(true);
           beast::get_lowest_layer(p->get_stream()).socket().set_option(option);
 
-          p->handshake_if_ssl();
+          try {
+            p->handshake_if_ssl(handshake_timeout);
+          } catch (std::exception& e) {
+            // Scanners, plain HTTP sent to the HTTPS port, idle connections,
+            // untrusted clients...: routine on a public port, so not a
+            // warning.
+            LOG(DEBUG) << "TLS handshake with " << p->get_remote_endpoint()
+                       << " failed: " << e.what() << "\n";
+            return;
+          }
 
           auto asyik_req = req_pool->acquire();
           auto& req = asyik_req->beast_request;
@@ -501,9 +552,20 @@ void http_connection<StreamType>::start()
                         std::move(p->get_stream())),
                     asyik_req);
 
+                new_ws->tls_context_holder = p->ssl_context;
+                p->is_websocket = true;
+                p->close_websocket =
+                    [w = std::weak_ptr<beast::websocket::stream<StreamType>>(
+                         new_ws->ws)]() {
+                      if (auto ws = w.lock()) {
+                        boost::system::error_code ec;
+                        auto& sock = beast::get_lowest_layer(*ws).socket();
+                        sock.cancel(ec);
+                        sock.close(ec);
+                      }
+                    };
                 asyik::internal::websocket::async_accept(*new_ws->ws, req)
                     .get();
-                p->is_websocket = true;
 
                 try {
                   std::get<2>(route)(new_ws, args);

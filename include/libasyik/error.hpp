@@ -30,6 +30,29 @@ ASYIK_DEFINE_RUNTIME_ERROR(network_unreachable_error, network_error,
 ASYIK_DEFINE_RUNTIME_ERROR(network_expired_error, network_error,
                            boost::asio::error::shut_down);
 
+// TLS failures. tls_error covers any OpenSSL/TLS-layer error; the more
+// specific types are raised by the client handshake.
+ASYIK_DEFINE_RUNTIME_ERROR(tls_error, network_error,
+                           boost::asio::error::connection_aborted);
+ASYIK_DEFINE_RUNTIME_ERROR(tls_handshake_error, tls_error,
+                           boost::asio::error::connection_aborted);
+
+// The peer certificate was rejected (untrusted issuer, expired, host name
+// mismatch, ...). verify_result() holds the OpenSSL X509_V_ERR_* code.
+class tls_verify_error : public tls_handshake_error {
+ public:
+  template <typename T>
+  tls_verify_error(T&& t, long verify_result, const std::string& s)
+      : tls_handshake_error(std::forward<T>(t), s),
+        verify_result_(verify_result)
+  {}
+
+  long verify_result() const { return verify_result_; }
+
+ private:
+  long verify_result_;
+};
+
 ASYIK_DEFINE_RUNTIME_ERROR(file_error, io_error,
                            boost::asio::error::bad_descriptor);
 ASYIK_DEFINE_RUNTIME_ERROR(resource_error, io_error,

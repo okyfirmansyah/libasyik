@@ -28,6 +28,12 @@ namespace asyik {
 websocket_ptr make_websocket_connection(service_ptr as, string_view url,
                                         int timeout = 10);
 
+// Same as above, with an explicit TLS client context for wss:// URLs
+// (nullptr = the service's context, see service::set_tls_client_context()).
+websocket_ptr make_websocket_connection(service_ptr as,
+                                        const tls::client_context_ptr& tls_ctx,
+                                        string_view url, int timeout = 10);
+
 // WebSocket base class
 class websocket : public std::enable_shared_from_this<websocket> {
  public:
@@ -188,13 +194,15 @@ class websocket_impl : public websocket {
  private:
   template <typename S>
   friend class http_connection;
-  friend websocket_ptr make_websocket_connection(service_ptr as,
-                                                 string_view url, int timeout);
   friend websocket_ptr make_websocket_connection_plain(
       service_ptr as, const http_url_scheme& scheme, int timeout);
   friend websocket_ptr make_websocket_connection_ssl(
-      service_ptr as, const http_url_scheme& scheme, int timeout);
+      service_ptr as, const tls::client_context_ptr& tls_ctx,
+      const http_url_scheme& scheme, int timeout);
 
+  // Keeps the TLS context alive for as long as the stream uses it. Declared
+  // before ws so it is destroyed after it.
+  std::shared_ptr<void> tls_context_holder;
   std::shared_ptr<StreamType> ws;
 };
 

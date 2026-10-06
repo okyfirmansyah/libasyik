@@ -45,13 +45,15 @@ ARG DOCKER_TYPE
 RUN mkdir /usr/local/libasyik
 COPY . /usr/local/libasyik
 
+# make -j2: the CI machine has 2 vCPUs and ~7.5GB RAM, and each Beast/Asio
+# translation unit needs 2-3GB to compile; -j4 ran out of memory.
 RUN if [ "$DOCKER_TYPE" = "TEST" ]; then \
     cd /usr/local/libasyik && \
     git submodule update --init --recursive && \
     mkdir build && \
     cd build && \
     cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=11 .. && \
-    make -j4 && \
+    make -j2 && \
     cp tests/libasyik_test  /usr/bin ; \
     fi
 
