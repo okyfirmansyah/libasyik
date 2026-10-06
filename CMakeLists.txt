@@ -17,6 +17,13 @@ add_subdirectory(external/Catch2)
 add_subdirectory(src)
 add_subdirectory(tests)
 
+# Optional soak (long-running stability) test executable, run locally:
+#   cmake -DLIBASYIK_BUILD_SOAK=ON ..  &&  ./tests/soak/libasyik_soak --help
+option(LIBASYIK_BUILD_SOAK "Build the libasyik_soak stability test executable" OFF)
+if(LIBASYIK_BUILD_SOAK)
+    add_subdirectory(tests/soak)
+endif()
+
 # Optional benchmark executables (built in Release/-O3 regardless of parent build type)
 # Enable with:  cmake -DLIBASYIK_BUILD_BENCHMARKS=ON ..
 option(LIBASYIK_BUILD_BENCHMARKS "Build HTTP benchmark server executables" OFF)
