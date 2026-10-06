@@ -1,6 +1,6 @@
 // HTTP client/server edge cases: handler failures, multipart responses split
 // over several writes or malformed, WebSocket upgrade errors, invalid URLs.
-// Uses ports 4310-4312.
+// Uses ports 4310-4313.
 
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
@@ -176,4 +176,59 @@ TEST_CASE("Clients return nullptr for unparsable URLs", "[http]")
     as->stop();
   });
   as->run();
+}
+
+TEST_CASE("Pipelined requests are all answered", "[http]")
+{
+  auto as = make_service();
+  auto server = make_http_server(as, "127.0.0.1", 4313);
+  server->on_http_request("/n/<int>", [](http_request_ptr req,
+                                         const http_route_args& args) {
+    req->response.body = "#" + args[1];
+    req->response.result(200);
+  });
+
+  run_client(as, server, [=]() {
+    asio::ip::tcp::socket sock(as->get_io_service());
+    sock.async_connect({asio::ip::make_address("127.0.0.1"), 4313},
+                       use_fiber_future)
+        .get();
+    // three requests in one write: the server reads past the first one
+    std::string requests =
+        "GET /n/1 HTTP/1.1\r\nHost: x\r\n\r\n"
+        "GET /n/2 HTTP/1.1\r\nHost: x\r\n\r\n"
+        "GET /n/3 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    asio::async_write(sock, asio::buffer(requests), use_fiber_future).get();
+
+    // read until the server closes; give up after 3s instead of hanging
+    asio::steady_timer timeout(as->get_io_service(), std::chrono::seconds(3));
+    bool timed_out = false;
+    timeout.async_wait([&](boost::system::error_code ec) {
+      if (!ec) {
+        timed_out = true;
+        sock.close();
+      }
+    });
+    std::string received;
+    try {
+      while (true) {
+        char buf[1024];
+        received.append(
+            buf,
+            sock.async_read_some(asio::buffer(buf), use_fiber_future).get());
+      }
+    } catch (boost::system::system_error&) {
+    }
+    timeout.cancel();
+    asyik::sleep_for(std::chrono::milliseconds(10));  // let the timer finish
+
+    REQUIRE(!timed_out);
+    auto first = received.find("#1"), second = received.find("#2"),
+         third = received.find("#3");
+    REQUIRE(first != std::string::npos);
+    REQUIRE(second != std::string::npos);
+    REQUIRE(third != std::string::npos);
+    REQUIRE(first < second);
+    REQUIRE(second < third);
+  });
 }

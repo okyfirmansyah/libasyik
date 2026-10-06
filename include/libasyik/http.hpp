@@ -526,6 +526,10 @@ void http_connection<StreamType>::start()
           auto asyik_req = req_pool->acquire();
           auto& req = asyik_req->beast_request;
           asyik_req->connection_wptr = http_connection_wptr<StreamType>(p);
+          // The request object is pooled: drop bytes a previous connection
+          // left. Not per request: a read can pull in the start of the next
+          // (pipelined) request, which must stay in the buffer.
+          asyik_req->buffer.clear();
           while (1) {
             // Single-pass read: parse header + body in one async_read call
             // (eliminates the extra fiber suspend/resume of the old two-phase
@@ -534,7 +538,6 @@ void http_connection<StreamType>::start()
             req_parser.header_limit(header_limit);
             req_parser.body_limit(body_limit);
 
-            asyik_req->buffer.clear();
 #ifdef LIBASYIK_HTTP_PROFILING
             auto _p_t0 = std::chrono::steady_clock::now();
 #endif
