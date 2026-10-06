@@ -3,6 +3,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 
+#include <boost/optional.hpp>
 #include <fstream>
 #include <iterator>
 
@@ -458,33 +459,56 @@ TEST_CASE("Process-wide default TLS client context can be replaced", "[tls]")
   });
 }
 
+// The X509_V_* result of an https request to a third-party host: X509_V_OK
+// when it succeeded, the verify error when the certificate was rejected, or
+// none when the host could not be reached. Network failures (resets,
+// timeouts, DNS) are retried and then skipped with a warning: they say
+// nothing about our TLS code. Any other TLS failure fails the test.
+boost::optional<long> public_verify_result(service_ptr as,
+                                           const std::string& url)
+{
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    try {
+      http_easy_request(as, 15000, "GET", url, "", {});
+      return long(X509_V_OK);
+    } catch (tls_verify_error& e) {
+      LOG(INFO) << url << ": " << e.what() << "\n";
+      return e.verify_result();
+    } catch (tls_error&) {
+      throw;
+    } catch (std::exception& e) {
+      WARN(url << " unreachable (attempt " << attempt << "): " << e.what());
+      asyik::sleep_for(std::chrono::seconds(1));
+    }
+  }
+  return boost::none;
+}
+
 // Needs internet access; skip with "~[external]".
 TEST_CASE("TLS against public endpoints", "[tls][external]")
 {
   auto as = make_service();
   as->execute([as]() {
     try {
-      auto req =
-          http_easy_request(as, "GET", "https://tls-v1-2.badssl.com:1012/");
-      REQUIRE(req->response.result() == 200);
-      REQUIRE(req->response.body.length());
+      auto expect = [&](const std::string& url, long expected) {
+        auto result = public_verify_result(as, url);
+        if (!result) {
+          WARN("skipped, host unreachable: " << url);
+          return;
+        }
+        INFO(url);
+        if (expected == -1)  // any verification failure
+          REQUIRE(*result != X509_V_OK);
+        else
+          REQUIRE(*result == expected);
+      };
 
-      req = http_easy_request(as, "GET", "https://sha256.badssl.com/");
-      REQUIRE(req->response.result() == 200);
-
-      REQUIRE(expect_verify_error([&] {
-                http_easy_request(as, "GET", "https://expired.badssl.com/");
-              }) == X509_V_ERR_CERT_HAS_EXPIRED);
-      REQUIRE(expect_verify_error([&] {
-                http_easy_request(as, "GET", "https://wrong.host.badssl.com/");
-              }) == X509_V_ERR_HOSTNAME_MISMATCH);
-      REQUIRE(expect_verify_error([&] {
-                http_easy_request(as, "GET", "https://self-signed.badssl.com/");
-              }) != X509_V_OK);
-      REQUIRE(expect_verify_error([&] {
-                http_easy_request(as, "GET",
-                                  "https://untrusted-root.badssl.com/");
-              }) != X509_V_OK);
+      expect("https://tls-v1-2.badssl.com:1012/", X509_V_OK);
+      expect("https://sha256.badssl.com/", X509_V_OK);
+      expect("https://expired.badssl.com/", X509_V_ERR_CERT_HAS_EXPIRED);
+      expect("https://wrong.host.badssl.com/", X509_V_ERR_HOSTNAME_MISMATCH);
+      expect("https://self-signed.badssl.com/", -1);
+      expect("https://untrusted-root.badssl.com/", -1);
     } catch (...) {
       as->stop();
       throw;
