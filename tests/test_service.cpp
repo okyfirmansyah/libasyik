@@ -766,3 +766,59 @@ TEST_CASE("async operations started while run() drains still complete",
   // finished in the graceful phase, not through the forced exit
   REQUIRE(elapsed < std::chrono::milliseconds(450));
 }
+
+namespace {
+// counts live instances, to see whether an argument still exists when the
+// task runs
+struct lifetime_tracker {
+  static int live;
+  lifetime_tracker() { live++; }
+  lifetime_tracker(const lifetime_tracker&) { live++; }
+  lifetime_tracker(lifetime_tracker&&) { live++; }
+  ~lifetime_tracker() { live--; }
+};
+int lifetime_tracker::live = 0;
+}  // namespace
+
+TEST_CASE("execute() and async() keep temporary arguments alive",
+          "[service]")
+{
+  auto as = asyik::make_service();
+
+  as->execute([as]() {
+    // stop the service also when a REQUIRE fails, so a failure cannot hang
+    struct stopper {
+      asyik::service_ptr as;
+      ~stopper() { as->stop(); }
+    } stop_on_exit{as};
+
+    // the task runs after execute()/async() returned, when the temporaries
+    // of the calling expression are gone
+    auto e = as->execute(
+        [](const lifetime_tracker&) { return lifetime_tracker::live; },
+        lifetime_tracker{});
+    REQUIRE(e.get() >= 1);
+    auto a = as->async(
+        [](const lifetime_tracker&) { return lifetime_tracker::live; },
+        lifetime_tracker{});
+    REQUIRE(a.get() >= 1);
+    REQUIRE(lifetime_tracker::live == 0);
+
+    auto s = as->execute([](const std::string& v) { return v; },
+                         std::string(1000, 'x'));
+    REQUIRE(s.get() == std::string(1000, 'x'));
+
+    // move-only temporaries
+    auto u = as->async([](std::unique_ptr<int> v) { return *v; },
+                       std::make_unique<int>(7));
+    REQUIRE(u.get() == 7);
+
+    // lvalues are still passed by reference
+    int counter = 0;
+    as->execute([](int& c) { c = 42; }, counter).get();
+    REQUIRE(counter == 42);
+    as->async([](int& c) { c++; }, counter).get();
+    REQUIRE(counter == 43);
+  });
+  as->run();
+}

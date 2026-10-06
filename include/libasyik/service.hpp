@@ -1,7 +1,9 @@
 #ifndef LIBASYIK_ASYIK_SERVICE_HPP
 #define LIBASYIK_ASYIK_SERVICE_HPP
 
+#include <memory>
 #include <string>
+#include <tuple>
 #include <type_traits>
 
 #include "aixlog.hpp"
@@ -40,6 +42,29 @@ struct helper<void> {
     p->set_value();
   }
 };
+
+// Nullary callable invoking f with args, for tasks that run after execute()
+// or async() returned. Temporaries (rvalue args) are moved into it, so they
+// outlive the call; lvalue args are passed by reference, so the caller must
+// keep them alive until the task has run. The args sit behind a shared_ptr
+// because tasks are stored in std::function, which needs copyable callables.
+template <typename F, typename... Args>
+auto bind_args(F&& f, Args&&... args)
+{
+  if constexpr (sizeof...(Args) == 0) {
+    return std::forward<F>(f);
+  } else {
+    return [f = std::forward<F>(f),
+            a = std::make_shared<std::tuple<Args...>>(
+                std::forward<Args>(args)...)]() mutable -> decltype(auto) {
+      return std::apply(
+          [&f](auto&... x) -> decltype(auto) {
+            return f(static_cast<Args&&>(x)...);
+          },
+          *a);
+    };
+  }
+}
 };  // namespace service_internal
 
 template <typename T>
@@ -90,12 +115,12 @@ class service : public std::enable_shared_from_this<service> {
     auto future = p->get_future();
     auto t = std::atomic_load(&execute_tasks);
     execute_task_count++;
-    t->push([f = std::forward<F>(fun), &args..., p, this]() mutable {
+    t->push([f = service_internal::bind_args(std::forward<F>(fun),
+                                             std::forward<Args>(args)...),
+             p, this]() mutable {
       try {
         service_internal::helper<
-            typename std::result_of<F(Args...)>::type>::set(p, f,
-                                                            std::forward<Args>(
-                                                                args)...);
+            typename std::result_of<F(Args...)>::type>::set(p, f);
       } catch (...) {
         p->set_exception(std::current_exception());
       };
@@ -122,15 +147,14 @@ class service : public std::enable_shared_from_this<service> {
     auto future = p->get_future();
     auto t = std::atomic_load(&tasks);
     async_queue_size++;
-    t->push([f = std::forward<F>(fun), as = weak_from_this(), &args...,
-             p]() mutable {
+    t->push([f = service_internal::bind_args(std::forward<F>(fun),
+                                             std::forward<Args>(args)...),
+             as = weak_from_this(), p]() mutable {
       auto prev_as = service::active_service;
       service::active_service = as;
       try {
         service_internal::helper<
-            typename std::result_of<F(Args...)>::type>::set(p, f,
-                                                            std::forward<Args>(
-                                                                args)...);
+            typename std::result_of<F(Args...)>::type>::set(p, f);
       } catch (...) {
         async_task_error++;
         p->set_exception(std::current_exception());
