@@ -638,3 +638,34 @@ TEST_CASE("scheduler stop terminates multiple fibers at suspension points",
 }
 
 }  // namespace asyik
+
+TEST_CASE("async operations started while run() drains still complete",
+          "[service][scheduler_stop]")
+{
+  // At stop() the only fiber is sleeping, so the io_context runs out of work
+  // and stops itself while run() drains. The timer wait the fiber starts
+  // afterwards must still complete (it used to hang until the forced exit,
+  // and the leftover fiber then hung the thread at exit).
+  auto as = asyik::make_service();
+  std::atomic<bool> done{false};
+
+  as->execute([as, &done]() {
+    as->execute([as, &done]() {
+      boost::this_fiber::sleep_for(std::chrono::milliseconds(50));
+      boost::asio::steady_timer t(as->get_io_service(),
+                                  std::chrono::milliseconds(1));
+      t.async_wait(asyik::use_fiber_future).get();
+      done = true;
+    });
+    asyik::sleep_for(std::chrono::milliseconds(5));
+    as->stop();
+  });
+
+  auto start = std::chrono::steady_clock::now();
+  as->run();
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  REQUIRE(done);
+  // finished in the graceful phase, not through the forced exit
+  REQUIRE(elapsed < std::chrono::milliseconds(450));
+}

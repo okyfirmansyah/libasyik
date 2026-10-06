@@ -155,10 +155,20 @@ void service::run(bool stop_on_complete)
 
   execute_tasks->close();
 
+  // The drain phases below keep polling while fibers finish. poll() stops the
+  // io_context whenever it runs out of work (e.g. every fiber is in
+  // sleep_for), after which it returns immediately until restart(): an async
+  // operation a fiber starts after that would never complete, leaving the
+  // fiber suspended forever (and the thread hanging at exit).
+  auto drain_poll = [this]() {
+    if (io_service.stopped()) io_service.restart();
+    io_service.poll();
+  };
+
   // Phase 1: drain the task channel – give all dispatched-but-not-yet-started
   // fibers a chance to pick up their task and begin executing.
   for (int i = 0; i < 200; i++) {
-    io_service.poll();
+    drain_poll();
     boost::this_fiber::yield();
   }
 
@@ -178,7 +188,7 @@ void service::run(bool stop_on_complete)
       if (std::chrono::steady_clock::now() > graceful_deadline) {
         break;
       }
-      io_service.poll();
+      drain_poll();
       boost::this_fiber::yield();
     }
 
@@ -202,7 +212,7 @@ void service::run(bool stop_on_complete)
               << " fiber(s) still active after scheduler stop, forcing exit\n";
           break;
         }
-        io_service.poll();
+        drain_poll();
         boost::this_fiber::yield();
       }
     }
@@ -210,7 +220,7 @@ void service::run(bool stop_on_complete)
     // Final flush: any deregistrations queued by the last batch of fiber
     // completions are processed here, before the io_context is destroyed.
     for (int i = 0; i < 20; i++) {
-      io_service.poll();
+      drain_poll();
       boost::this_fiber::yield();
     }
   }
