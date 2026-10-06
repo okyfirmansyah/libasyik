@@ -469,6 +469,22 @@ target_link_libraries(my_service libasyik Boost::fiber Boost::context Threads::T
 # SET(LIBASYIK_ENABLE_SSL_SERVER OFF)
 ```
 
+## Running the Tests and Coverage
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DLIBASYIK_ENABLE_COVERAGE=ON
+cmake --build build --target libasyik_test -j4
+./build/tests/libasyik_test            # "~[sql]" skips the PostgreSQL tests
+
+# library coverage only (include/ and src/), as reported to Codecov
+lcov --capture --directory build -o all.info
+lcov --extract all.info "$PWD/include/*" "$PWD/src/*" -o lib.info
+lcov --list lib.info
+```
+
+The `[sql]` tests need PostgreSQL on localhost:5432 (user `postgres`,
+password `test`), e.g. `docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine`.
+
 ## Required includes by feature
 
 | Feature | Include |

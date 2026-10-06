@@ -4,6 +4,15 @@ project(libasyik)
 SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
 SET(LIBASYIK_ENABLE_SSL_SERVER ON CACHE BOOL "Libasyik Enable SSL/HTTPS Server Support")
 
+# Instrument both the library and the tests for gcov/lcov. The library must be
+# instrumented too, otherwise src/*.cpp never shows up in the coverage report.
+# -fprofile-update=atomic: counters are hit from many threads (async() worker
+# pool, multi-service tests); plain counters race and go negative.
+option(LIBASYIK_ENABLE_COVERAGE "Build libasyik and its tests with coverage instrumentation" OFF)
+if(LIBASYIK_ENABLE_COVERAGE AND NOT MSVC)
+    set(LIBASYIK_COVERAGE_FLAGS -O0 -g --coverage -fprofile-update=atomic)
+endif()
+
 add_subdirectory(external/Catch2)
 add_subdirectory(src)
 add_subdirectory(tests)

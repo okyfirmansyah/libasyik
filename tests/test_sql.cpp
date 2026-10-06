@@ -1,3 +1,5 @@
+#include <map>
+#include <set>
 #include <thread>
 
 #include "catch2/catch.hpp"
@@ -340,7 +342,8 @@ TEST_CASE("Test LISTEN/NOTIFY multiple threads and channels", "[sql]")
     std::unique_lock<fibers::mutex> lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (received.load() < expected) {
-      cv.wait_until(lk, deadline);
+      // past the deadline wait_until returns at once: fail instead of spinning
+      if (cv.wait_until(lk, deadline) == fibers::cv_status::timeout) break;
     }
     as->stop();
   });
@@ -353,4 +356,181 @@ TEST_CASE("Test LISTEN/NOTIFY multiple threads and channels", "[sql]")
   // ensure all channels received something
   for (auto& ch : channels) REQUIRE(per_channel_count[ch] > 0);
 }
+namespace {
+const char* admin_conn =
+    "host=localhost dbname=postgres password=test user=postgres";
+
+// polls cond() every 50ms until it holds or timeout_ms passes
+template <typename F>
+bool wait_for(F cond, int timeout_ms = 10000)
+{
+  auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (!cond()) {
+    if (std::chrono::steady_clock::now() > deadline) return false;
+    asyik::sleep_for(std::chrono::milliseconds(50));
+  }
+  return true;
+}
+
+int backend_pid(sql_session_ptr ses)
+{
+  int pid = 0;
+  ses->query("select pg_backend_pid()", soci::into(pid));
+  return pid;
+}
+
+// runs f in a fiber on as and stops the service afterwards, also when f
+// throws; rethrows f's exception
+template <typename F>
+void run_in_service(service_ptr as, F f)
+{
+  auto done = as->execute([as, f]() {
+    try {
+      f();
+    } catch (...) {
+      as->stop();
+      throw;
+    }
+    as->stop();
+  });
+  as->run();
+  done.get();
+}
+
+void terminate_backends(sql_pool_ptr admin, service_ptr as,
+                        const std::string& where)
+{
+  auto ses = admin->get_session(as);
+  ses->query("select pg_terminate_backend(pid) from pg_stat_activity where " +
+             where + " and pid <> pg_backend_pid()");
+}
+}  // namespace
+
+TEST_CASE("SQL pool health check renews broken sessions", "[sql]")
+{
+  auto as = asyik::make_service();
+  auto admin = make_sql_pool(sql_backend_postgresql, admin_conn, 2);
+
+  run_in_service(as, [=]() {
+    {
+      terminate_backends(admin, as, "datname = 'asyik_hc'");
+      auto ses = admin->get_session(as);
+      ses->query("DROP DATABASE IF EXISTS asyik_hc");
+      ses->query("CREATE DATABASE asyik_hc");
+    }
+
+    {
+      auto pool = make_sql_pool(
+          sql_backend_postgresql,
+          "host=localhost dbname=asyik_hc password=test user=postgres", 2);
+      pool->set_health_check_period(1);
+
+      // all pooled sessions are usable and backed by none of old_pids
+      auto all_healthy = [&](std::set<int> old_pids) {
+        try {
+          auto a = pool->get_session(as);
+          auto b = pool->get_session(as);
+          int pa = backend_pid(a), pb = backend_pid(b);
+          return !old_pids.count(pa) && !old_pids.count(pb);
+        } catch (std::exception&) {
+          return false;
+        }
+      };
+      std::set<int> pids;
+      {
+        auto a = pool->get_session(as);
+        auto b = pool->get_session(as);
+        pids = {backend_pid(a), backend_pid(b)};
+      }
+
+      // backends die: the health check replaces both sessions
+      terminate_backends(admin, as, "datname = 'asyik_hc'");
+      REQUIRE(wait_for([&]() { return all_healthy(pids); }));
+
+      // backends die and the database refuses new connections: renewal
+      // fails and the broken sessions stay pooled...
+      {
+        auto ses = admin->get_session(as);
+        ses->query("ALTER DATABASE asyik_hc ALLOW_CONNECTIONS false");
+      }
+      terminate_backends(admin, as, "datname = 'asyik_hc'");
+      asyik::sleep_for(std::chrono::milliseconds(2500));
+      {
+        auto ses = pool->get_session(as);
+        REQUIRE_THROWS(backend_pid(ses));
+      }
+
+      // ...until connections are allowed again
+      {
+        auto ses = admin->get_session(as);
+        ses->query("ALTER DATABASE asyik_hc ALLOW_CONNECTIONS true");
+      }
+      REQUIRE(wait_for([&]() { return all_healthy({}); }));
+    }
+
+    // pool destroyed: give the health check thread time to notice and exit
+    asyik::sleep_for(std::chrono::milliseconds(1500));
+
+    REQUIRE(wait_for([&]() {
+      try {
+        terminate_backends(admin, as, "datname = 'asyik_hc'");
+        admin->get_session(as)->query("DROP DATABASE IF EXISTS asyik_hc");
+        return true;
+      } catch (std::exception&) {
+        return false;
+      }
+    }));
+  });
+}
+
+TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
+{
+  auto as = asyik::make_service();
+  auto pool = make_sql_pool(sql_backend_postgresql, admin_conn, 3);
+
+  run_in_service(as, [=]() {
+    auto listener = pool->get_session(as);
+    std::map<std::string, int> received;
+    auto count = [&](const std::string& channel, const std::string&) {
+      received[channel]++;
+    };
+    auto notify = [&](const std::string& channel) {
+      pool->get_session(as)->query("NOTIFY " + channel + ", 'x'");
+    };
+
+    listener->listen("asyik_ch_x", count);
+    listener->listen("asyik_ch_y", count);
+    notify("asyik_ch_x");
+    notify("asyik_ch_y");
+    REQUIRE(wait_for([&]() {
+      return received["asyik_ch_x"] == 1 && received["asyik_ch_y"] == 1;
+    }));
+
+    // dropping one channel keeps the watcher running for the other
+    listener->unlisten("asyik_ch_x");
+    notify("asyik_ch_x");
+    notify("asyik_ch_y");
+    REQUIRE(wait_for([&]() { return received["asyik_ch_y"] == 2; }));
+    REQUIRE(received["asyik_ch_x"] == 1);
+    REQUIRE(listener->notify_running);
+
+    // dropping the last channel cancels the watcher
+    listener->unlisten("asyik_ch_y");
+    REQUIRE(wait_for([&]() { return !listener->notify_running; }));
+
+    // the watcher stops when the backend goes away...
+    listener->listen("asyik_ch_z", count);
+    REQUIRE(listener->notify_running);
+    terminate_backends(pool, as,
+                       "pid = " + std::to_string(backend_pid(listener)));
+    REQUIRE(wait_for([&]() { return !listener->notify_running; }));
+
+    // ...and LISTEN/UNLISTEN on the dead connection do not throw
+    REQUIRE_NOTHROW(listener->listen("asyik_ch_w", count));
+    REQUIRE_NOTHROW(listener->unlisten("asyik_ch_w"));
+    REQUIRE_NOTHROW(listener->unlisten("asyik_ch_z"));
+  });
+}
+
 }  // namespace asyik

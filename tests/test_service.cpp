@@ -638,6 +638,103 @@ TEST_CASE("scheduler stop terminates multiple fibers at suspension points",
 }
 
 }  // namespace asyik
+TEST_CASE("service run() returns when a fiber ignores the stop request",
+          "[service][scheduler_stop]")
+{
+  // boost::this_fiber::yield() is not an interruption point, so this fiber
+  // survives both the graceful and the forced stop phase (500ms each)
+  auto as = asyik::make_service();
+  std::atomic<bool> finished{false};
+
+  as->execute([as, &finished]() {
+    as->execute([&finished]() {
+      auto until =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+      while (std::chrono::steady_clock::now() < until)
+        boost::this_fiber::yield();
+      finished = true;
+    });
+    asyik::sleep_for(std::chrono::milliseconds(10));
+    as->stop();
+  });
+
+  auto start = std::chrono::steady_clock::now();
+  as->run();
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  REQUIRE(!finished);
+  REQUIRE(elapsed >= std::chrono::milliseconds(900));
+  REQUIRE(elapsed < std::chrono::milliseconds(1450));
+
+  // let the leftover fiber finish on this thread before the next test
+  while (!finished) boost::this_fiber::sleep_for(std::chrono::milliseconds(10));
+}
+
+TEST_CASE("async() statistics", "[service]")
+{
+  auto as = asyik::make_service();
+  auto before = asyik::service::get_async_stats();
+
+  as->execute([as, before]() {
+    for (int i = 0; i < 20; i++)
+      REQUIRE(as->async([i]() { return i * 2; }).get() == i * 2);
+    REQUIRE_THROWS_AS(
+        as->async([]() { throw std::runtime_error("boom"); }).get(),
+        std::runtime_error);
+
+    // the counters are updated after the result is delivered
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    asyik::async_stats now;
+    do {
+      asyik::sleep_for(std::chrono::milliseconds(5));
+      now = asyik::service::get_async_stats();
+    } while (now.task_terminated - before.task_terminated < 21 &&
+             std::chrono::steady_clock::now() < deadline);
+
+    REQUIRE(now.task_started - before.task_started >= 21);
+    REQUIRE(now.task_terminated - before.task_terminated >= 21);
+    REQUIRE(now.task_error - before.task_error >= 1);
+    as->stop();
+  });
+  as->run();
+}
+
+TEST_CASE("use_fiber_future with a packaged function", "[service]")
+{
+  auto as = asyik::make_service();
+
+  as->execute([as]() {
+    boost::asio::steady_timer t(as->get_io_service());
+
+    // the function's result becomes the future's value...
+    t.expires_after(std::chrono::milliseconds(1));
+    auto value = t.async_wait(asyik::use_fiber_future(
+        [](boost::system::error_code ec) { return ec ? -1 : 42; }));
+    REQUIRE(value.get() == 42);
+
+    // ...and what it throws, the future's exception
+    t.expires_after(std::chrono::milliseconds(1));
+    auto thrown = t.async_wait(
+        asyik::use_fiber_future([](boost::system::error_code) -> int {
+          throw std::runtime_error("from handler");
+        }));
+    REQUIRE_THROWS_AS(thrown.get(), std::runtime_error);
+
+    // plain token: an error code becomes a system_error
+    t.expires_after(std::chrono::hours(1));
+    auto cancelled = t.async_wait(asyik::use_fiber_future);
+    t.cancel();
+    try {
+      cancelled.get();
+      FAIL("expected operation_aborted");
+    } catch (boost::system::system_error& e) {
+      REQUIRE(e.code() == boost::asio::error::operation_aborted);
+    }
+
+    as->stop();
+  });
+  as->run();
+}
 
 TEST_CASE("async operations started while run() drains still complete",
           "[service][scheduler_stop]")

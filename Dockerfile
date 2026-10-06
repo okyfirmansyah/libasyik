@@ -52,7 +52,7 @@ RUN if [ "$DOCKER_TYPE" = "TEST" ]; then \
     git submodule update --init --recursive && \
     mkdir build && \
     cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=11 .. && \
+    cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=11 -DLIBASYIK_ENABLE_COVERAGE=ON .. && \
     make -j2 && \
     cp tests/libasyik_test  /usr/bin ; \
     fi

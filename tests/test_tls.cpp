@@ -161,6 +161,14 @@ TEST_CASE("TLS client context configuration", "[tls]")
     X509_free(leaf);
   }
 
+  SECTION("CA directory (ca_path) is accepted")
+  {
+    auto cfg = test_client_config();
+    cfg.ca_file.clear();
+    cfg.ca_path = cert_path("");
+    REQUIRE(tls::make_client_context(cfg));
+  }
+
   SECTION("insecure() disables all verification")
   {
     auto cfg = tls::client_config::insecure();

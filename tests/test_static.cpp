@@ -1,10 +1,15 @@
-// Static file serving tests – uses ports 4100, 4101, 4102.
+// Static file serving tests – uses ports 4100, 4101, 4102, 4103.
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
@@ -354,6 +359,78 @@ TEST_CASE("serve_static: path traversal is blocked", "[static_file][http]")
     req = asyik::http_easy_request(as, "GET", encoded_traversal);
     REQUIRE((req->response.result() == 403 || req->response.result() == 404));
     REQUIRE(req->response.body.find("TOP SECRET") == std::string::npos);
+
+    as->stop();
+  });
+
+  as->run();
+  rmrf(root);
+  rmrf(outside);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("serve_static: unusual paths dates and ranges", "[static_file][http]")
+{
+  std::string root = make_temp_dir();
+  std::string outside = make_temp_dir("asyik_static_outside_");
+  write_file(root, "data.txt", "0123456789");
+  write_file(outside, "secret.txt", "secret");
+  std::filesystem::create_directory(root + "/noindex");
+  std::filesystem::create_directories(root + "/dirindex/index.html");
+#ifndef _WIN32
+  std::filesystem::create_directory(root + "/escape");
+  std::filesystem::create_symlink(outside + "/secret.txt",
+                                  root + "/escape/index.html");
+  REQUIRE(::mkfifo((root + "/pipe").c_str(), 0600) == 0);
+#endif
+
+  auto as = asyik::make_service();
+  auto server = asyik::make_http_server(as, "127.0.0.1", 4103);
+  server->serve_static("/files", root);
+  server->serve_static("/missing", root + "/does/not/exist");
+
+  as->execute([as]() {
+    std::string base = "http://127.0.0.1:4103";
+    auto get = [&](const std::string& path,
+                   const std::map<boost::string_view, boost::string_view>&
+                       headers = {}) {
+      return asyik::http_easy_request(as, 5000, "GET", base + path, "",
+                                      headers);
+    };
+
+    // root_dir that cannot be resolved: every request is 404
+    REQUIRE(get("/missing/data.txt")->response.result() == 404);
+
+    // decoded NUL byte
+    REQUIRE(get("/files/data%00.txt")->response.result() == 400);
+
+    // directory without index file
+    REQUIRE(get("/files/noindex/")->response.result() == 404);
+    // index file that is a directory
+    REQUIRE(get("/files/dirindex/")->response.result() == 403);
+#ifndef _WIN32
+    // index file that is a symlink leaving the root
+    REQUIRE(get("/files/escape/")->response.result() == 403);
+    // not a regular file
+    REQUIRE(get("/files/pipe")->response.result() == 403);
+#endif
+
+    // If-Modified-Since in the obsolete formats RFC 7231 still accepts
+    REQUIRE(get("/files/data.txt",
+                {{"If-Modified-Since", "Saturday, 01-Jan-50 00:00:00 GMT"}})
+                ->response.result() == 304);
+    REQUIRE(get("/files/data.txt",
+                {{"If-Modified-Since", "Fri Jan  1 00:00:00 2099"}})
+                ->response.result() == 304);
+    // unparsable date is ignored
+    REQUIRE(get("/files/data.txt", {{"If-Modified-Since", "yesterday"}})
+                ->response.result() == 200);
+
+    // malformed range is ignored: full body
+    auto req = get("/files/data.txt", {{"Range", "bytes=abc-3"}});
+    REQUIRE(req->response.result() == 200);
+    REQUIRE(req->response.body == "0123456789");
 
     as->stop();
   });

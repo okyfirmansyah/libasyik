@@ -20,6 +20,12 @@ endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 
+if(LIBASYIK_COVERAGE_FLAGS)
+    target_compile_options(${PROJECT_NAME} PRIVATE ${LIBASYIK_COVERAGE_FLAGS})
+    # PUBLIC: whatever links the instrumented static library needs libgcov
+    target_link_options(${PROJECT_NAME} PUBLIC --coverage)
+endif()
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../external/cppcodec)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../external/Catch2/include)
