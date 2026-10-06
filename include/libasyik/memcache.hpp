@@ -21,6 +21,9 @@ struct single_thread {
   using mutex_type = int;
   template <typename T>
   using atomic_type = T;
+  // get()/at() return a reference into the cache
+  template <typename T>
+  using result_type = T&;
 };
 
 template <typename MutexType>
@@ -29,6 +32,11 @@ struct multi_thread {
   using mutex_type = MutexType;
   template <typename T>
   using atomic_type = std::atomic<T>;
+  // get()/at() return a copy made under the lock: a reference would outlive
+  // the lock while other threads put, erase, prune or move the entry (get()
+  // moves it to a fresher segment). Use visit() for in-place access.
+  template <typename T>
+  using result_type = T;
 };
 
 template <class Key, class T, int expiry, int segments, typename thread_policy>
@@ -84,7 +92,7 @@ class memcache : public std::enable_shared_from_this<
     map_list.clear();
   }
 
-  T& at(const Key& k)
+  typename thread_policy::template result_type<T> at(const Key& k)
   {
     int64_t current_ms = now_ms();
 
@@ -98,9 +106,32 @@ class memcache : public std::enable_shared_from_this<
     throw std::out_of_range("item not found/out of range in memcache!");
   }
 
-  const T& at(const Key& k) const { return at(k); }
+  typename thread_policy::template result_type<const T> at(const Key& k) const
+  {
+    return const_cast<memcache*>(this)->at(k);
+  }
 
-  T& get(const Key& k)
+  // Calls f(T&) under the cache lock if k is present and not expired (its
+  // expiry is not refreshed); returns whether it was. The way to modify
+  // values in place, or to read non-copyable ones, in a multi-thread cache.
+  template <typename F>
+  bool visit(const Key& k, F&& f)
+  {
+    int64_t current_ms = now_ms();
+
+    typename thread_policy::guard_type t(mtx);
+    for (auto& m : map_list) {
+      if (current_ms > m.first) break;
+      auto it = m.second.find(k);
+      if (it != m.second.end()) {
+        f(it->second);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  typename thread_policy::template result_type<T> get(const Key& k)
   {
     typename thread_policy::guard_type t(mtx);
     prune();

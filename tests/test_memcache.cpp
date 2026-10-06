@@ -1,5 +1,11 @@
+#include <atomic>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <vector>
 
 #include "catch2/catch.hpp"
 #include "libasyik/error.hpp"
@@ -276,3 +282,72 @@ TEST_CASE("Testing long expiry does not overflow")
 }
 
 }  // namespace asyik
+
+TEST_CASE("multi-thread memcache hands out copies, and visit()")
+{
+  auto as = asyik::make_service();
+  auto single = asyik::make_memcache<int, int, 5>(as);
+  auto cache = asyik::make_memcache_mt<int, std::string, 5>(as);
+  // a reference would dangle once the lock is released
+  static_assert(!std::is_reference<decltype(cache->get(0))>::value,
+                "multi-thread get() must return a copy");
+  static_assert(!std::is_reference<decltype(cache->at(0))>::value,
+                "multi-thread at() must return a copy");
+  static_assert(std::is_reference<decltype(single->get(0))>::value,
+                "single-thread get() still returns a reference");
+
+  // readers and writers on plain threads: values must never be torn
+  std::atomic<bool> corrupted{false};
+  std::vector<std::thread> threads;
+  auto until =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+  for (int t = 0; t < 4; t++)
+    threads.emplace_back([&, t]() {
+      unsigned n = t;
+      while (std::chrono::steady_clock::now() < until) {
+        int key = n++ % 4;
+        try {
+          if (n % 3 == 0) {
+            cache->put(key, std::string(64 + n % 64, char('a' + n % 26)));
+          } else {
+            std::string v = n % 2 ? cache->get(key) : cache->at(key);
+            if (v.size() < 64 || v.find_first_not_of(v[0]) != std::string::npos)
+              corrupted = true;
+          }
+        } catch (std::out_of_range&) {
+        }
+      }
+    });
+  for (auto& t : threads) t.join();
+  REQUIRE(!corrupted);
+
+  as->execute([&]() {
+    // stop also when a REQUIRE fails, so a failure cannot hang the test
+    struct stopper {
+      asyik::service_ptr as;
+      ~stopper() { as->stop(); }
+    } stop_on_exit{as};
+
+    // keys from 100 on: the threads above used 0-3
+    // const at() (used to call itself forever)
+    single->put(100, 10);
+    const auto& const_single = *single;
+    REQUIRE(const_single.at(100) == 10);
+    cache->put(100, "one");
+    const auto& const_cache = *cache;
+    REQUIRE(const_cache.at(100) == "one");
+
+    // in-place access
+    REQUIRE(cache->visit(100, [](std::string& v) { v += "!"; }));
+    REQUIRE(cache->get(100) == "one!");
+    REQUIRE(!cache->visit(101, [](std::string&) { REQUIRE(false); }));
+
+    // non-copyable values
+    auto owned = asyik::make_memcache_mt<int, std::unique_ptr<int>, 5>(as);
+    owned->put(1, std::make_unique<int>(7));
+    int seen = 0;
+    REQUIRE(owned->visit(1, [&](std::unique_ptr<int>& p) { seen = *p; }));
+    REQUIRE(seen == 7);
+  });
+  as->run();
+}
