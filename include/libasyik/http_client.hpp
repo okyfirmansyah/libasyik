@@ -47,7 +47,22 @@ http_request_ptr http_easy_request(
     service_ptr as, int timeout_ms, string_view method, string_view url,
     D&& data, const std::map<string_view, string_view>& headers);
 
+// Same as above, with an explicit TLS client context for https:// URLs
+// (nullptr = the service's context, see service::set_tls_client_context()).
+template <typename D>
+http_request_ptr http_easy_request(
+    service_ptr as, const tls::client_context_ptr& tls_ctx, int timeout_ms,
+    string_view method, string_view url, D&& data,
+    const std::map<string_view, string_view>& headers);
+
 // Multipart request functions
+template <typename D, typename F>
+http_request_ptr http_easy_request_multipart(
+    service_ptr as, const tls::client_context_ptr& tls_ctx, int timeout_ms,
+    string_view method, string_view url, D&& data,
+    const std::map<string_view, string_view>& headers, F&& f,
+    const digest_authenticator* auth = nullptr);
+
 template <typename D, typename F>
 http_request_ptr http_easy_request_multipart(
     service_ptr as, int timeout_ms, string_view method, string_view url,
@@ -175,8 +190,9 @@ class http_request : public std::enable_shared_from_this<http_request> {
 
   template <typename D, typename F>
   friend http_request_ptr http_easy_request_multipart(
-      service_ptr as, int timeout_ms, string_view method, string_view url,
-      D&& data, const std::map<string_view, string_view>& headers, F&& f,
+      service_ptr as, const tls::client_context_ptr& tls_ctx, int timeout_ms,
+      string_view method, string_view url, D&& data,
+      const std::map<string_view, string_view>& headers, F&& f,
       const digest_authenticator* auth);
 
   template <typename S, typename R, typename F>

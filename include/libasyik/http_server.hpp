@@ -24,6 +24,7 @@
 #include "object_pool.hpp"
 #include "route_table.hpp"
 #include "service.hpp"
+#include "tls.hpp"
 
 namespace fibers = boost::fibers;
 namespace asio = boost::asio;
@@ -40,6 +41,18 @@ http_server_ptr<http_stream_type> make_http_server(service_ptr as,
                                                    uint16_t port = 80,
                                                    bool reuse_port = false);
 #ifdef LIBASYIK_ENABLE_SSL_SERVER
+// HTTPS server with secure defaults (see tls::server_config).
+http_server_ptr<https_stream_type> make_https_server(
+    service_ptr as, const tls::server_config& cfg, string_view addr,
+    uint16_t port = 443, bool reuse_port = false);
+
+// HTTPS server using a prepared context, which may be shared by several
+// servers.
+http_server_ptr<https_stream_type> make_https_server(
+    service_ptr as, tls::server_context_ptr ctx, string_view addr,
+    uint16_t port = 443, bool reuse_port = false);
+
+// HTTPS server with a hand-configured Asio context.
 http_server_ptr<https_stream_type> make_https_server(service_ptr,
                                                      ssl::context&& ssl,
                                                      string_view,
@@ -47,8 +60,27 @@ http_server_ptr<https_stream_type> make_https_server(service_ptr,
                                                      bool reuse_port = false);
 #endif
 
+// Defaults for http_server::set_tls_handshake_timeout() and
+// set_tls_shutdown_timeout().
+static constexpr std::chrono::milliseconds default_tls_handshake_timeout{
+    10000};
+static constexpr std::chrono::milliseconds default_tls_shutdown_timeout{2000};
+
 namespace internal {
 std::string route_spec_to_regex(string_view route_spc);
+
+#ifdef LIBASYIK_ENABLE_SSL_SERVER
+http_server_ptr<https_stream_type> start_https_server(
+    service_ptr as, std::shared_ptr<boost::asio::ssl::context> ctx,
+    string_view addr, uint16_t port, bool reuse_port);
+#endif
+
+// remote_endpoint() that does not throw when the peer has already gone.
+inline tcp::endpoint remote_endpoint_of(const tcp::socket& sock)
+{
+  boost::system::error_code ec;
+  return sock.remote_endpoint(ec);
+}
 
 // Apply address-reuse socket options before bind(). reuse_port requests
 // kernel load balancing across acceptors (SO_REUSEPORT), which is not
@@ -174,10 +206,36 @@ class http_server
 
   void set_request_body_limit(size_t l) { request_body_limit = l; }
 
+  /// HTTPS only: time allowed for a new connection to complete the TLS
+  /// handshake before it is dropped. Protects against clients that connect
+  /// and send nothing. Zero or negative disables the limit.
+  void set_tls_handshake_timeout(std::chrono::milliseconds t)
+  {
+    tls_handshake_timeout = t;
+  }
+  std::chrono::milliseconds get_tls_handshake_timeout() const
+  {
+    return tls_handshake_timeout;
+  }
+
+  /// HTTPS only: when closing a connection, how long to wait for the
+  /// client's TLS close_notify before closing the socket anyway. Zero or
+  /// negative waits without limit.
+  void set_tls_shutdown_timeout(std::chrono::milliseconds t)
+  {
+    tls_shutdown_timeout = t;
+  }
+  std::chrono::milliseconds get_tls_shutdown_timeout() const
+  {
+    return tls_shutdown_timeout;
+  }
+
   /// Stop accepting new connections AND forcefully close all currently active
-  /// connections.  Closing the underlying sockets cancels any pending
-  /// async_read / async_write operations with operation_aborted, which lets
-  /// the per-connection handler fibers unwind cleanly.
+  /// connections, including websockets whose handler is still running.
+  /// Closing the underlying sockets cancels any pending async_read /
+  /// async_write operations with operation_aborted, which lets the
+  /// per-connection handler fibers unwind cleanly. A websocket that a handler
+  /// handed over to other code before returning is not affected.
   ///
   /// Without this, a keep-alive client that holds the connection open after
   /// receiving its response would keep the connection-handler fiber blocked
@@ -200,6 +258,11 @@ class http_server
     }
 
     for (auto& c : live) {
+      // After a websocket upgrade the stream has moved into the websocket.
+      if (c->is_websocket) {
+        if (c->close_websocket) c->close_websocket();
+        continue;
+      }
       boost::system::error_code cec;
       auto& sock = beast::get_lowest_layer(c->get_stream()).socket();
       sock.cancel(cec);
@@ -246,7 +309,7 @@ class http_server
   route_table<http_route_tuple> http_route_table_;
   route_table<websocket_route_tuple> ws_route_table_;
 
-  std::shared_ptr<ssl::context> ssl_context;
+  std::shared_ptr<boost::asio::ssl::context> ssl_context;
 
   std::shared_ptr<shared_object_pool<http_connection<StreamType>>> conn_pool_;
   std::shared_ptr<shared_object_pool<http_request>> req_pool_;
@@ -259,6 +322,9 @@ class http_server
 
   size_t request_body_limit;
   size_t request_header_limit;
+  std::chrono::milliseconds tls_handshake_timeout =
+      default_tls_handshake_timeout;
+  std::chrono::milliseconds tls_shutdown_timeout = default_tls_shutdown_timeout;
 
   template <typename S>
   friend class http_connection;
@@ -266,8 +332,9 @@ class http_server
                                                             string_view,
                                                             uint16_t, bool);
 #ifdef LIBASYIK_ENABLE_SSL_SERVER
-  friend http_server_ptr<https_stream_type> make_https_server(
-      service_ptr, ssl::context&& ssl, string_view, uint16_t, bool);
+  friend http_server_ptr<https_stream_type> internal::start_https_server(
+      service_ptr, std::shared_ptr<boost::asio::ssl::context>, string_view,
+      uint16_t, bool);
 #endif
 };
 
@@ -292,8 +359,8 @@ class http_connection
         stream(std::move(sock)),
         is_websocket(false),
         is_server_connection(true),
-        remote_endpoint(
-            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
+        remote_endpoint(internal::remote_endpoint_of(
+            beast::get_lowest_layer(stream).socket())){};
 
   http_connection(struct private_&&, tcp::socket&& sock,
                   http_server_ptr<https_stream_type> server)
@@ -302,23 +369,27 @@ class http_connection
         stream(std::move(sock), *ssl_context),
         is_websocket(false),
         is_server_connection(true),
-        remote_endpoint(
-            beast::get_lowest_layer(stream).socket().remote_endpoint()){};
+        remote_endpoint(internal::remote_endpoint_of(
+            beast::get_lowest_layer(stream).socket())){};
 
   StreamType& get_stream() { return stream; };
   tcp::endpoint get_remote_endpoint() const { return remote_endpoint; };
 
  private:
   void start();
-  inline void handshake_if_ssl();
+  inline void handshake_if_ssl(std::chrono::milliseconds timeout);
   inline void shutdown_ssl();
 
   http_server_wptr<StreamType> http_server;
-  std::shared_ptr<ssl::context> ssl_context;
+  std::shared_ptr<boost::asio::ssl::context> ssl_context;
   StreamType stream;
   bool is_websocket;
+  // Set on websocket upgrade: closes the websocket's socket, if it still
+  // exists. Used by http_server::close().
+  std::function<void()> close_websocket;
   bool is_server_connection;
   tcp::endpoint remote_endpoint;
+  std::chrono::milliseconds tls_shutdown_timeout = default_tls_shutdown_timeout;
 
   template <typename S>
   friend class http_server;

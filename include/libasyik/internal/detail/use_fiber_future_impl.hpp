@@ -23,6 +23,7 @@
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/execution.hpp>
 #include <boost/asio/packaged_task.hpp>
+#include <boost/asio/ssl/error.hpp>
 #include <boost/asio/system_executor.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
@@ -332,6 +333,10 @@ void asyik_set_error(const boost::system::error_code& ec, P& p_)
         asyik::already_closed_error(ec,
                                     "[asyik::already_closed_error]end of "
                                     "stream or network connection closed")));
+  } else if ((ec.category() == asio::error::get_ssl_category()) ||
+             (ec.category() == asio::ssl::error::get_stream_category())) {
+    p_->set_exception(std::make_exception_ptr(
+        asyik::tls_error(ec, "[asyik::tls_error]" + ec.message())));
   } else
     p_->set_exception(
         std::make_exception_ptr(boost::system::system_error(ec, ec.message())));

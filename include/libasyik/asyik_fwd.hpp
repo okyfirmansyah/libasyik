@@ -48,6 +48,14 @@ using sql_session_ptr = std::shared_ptr<sql_session>;
 template <class Key, class T, int expiry, int segments, typename thread_policy>
 class memcache;
 
+namespace tls {
+class client_context;
+using client_context_ptr = std::shared_ptr<client_context>;
+struct server_config;
+class server_context;
+using server_context_ptr = std::shared_ptr<server_context>;
+}  // namespace tls
+
 }  // namespace asyik
 
 #endif  // LIBASYIK_ASYIK_FWD_HPP

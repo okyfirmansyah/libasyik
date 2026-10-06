@@ -2,6 +2,7 @@
 #include "libasyik/http.hpp"
 #include "libasyik/internal/asio_internal.hpp"
 #include "libasyik/service.hpp"
+#include "libasyik/tls.hpp"
 
 namespace asio = boost::asio;
 namespace ssl = asio::ssl;
@@ -11,9 +12,9 @@ namespace http = boost::beast::http;
 
 namespace asyik {
 
-websocket_ptr make_websocket_connection_ssl(service_ptr as,
-                                            const http_url_scheme& scheme,
-                                            const int timeout)
+websocket_ptr make_websocket_connection_ssl(
+    service_ptr as, const tls::client_context_ptr& tls_ctx,
+    const http_url_scheme& scheme, const int timeout)
 {
   tcp::resolver resolver(asio::make_strand(as->get_io_service()));
 
@@ -22,14 +23,8 @@ websocket_ptr make_websocket_connection_ssl(service_ptr as,
                                       std::to_string(scheme.port()))
           .get();
 
-  // The SSL context is required, and holds certificates
-  ssl::context ctx(ssl::context::tlsv12_client);
-
-  // This holds the root certificate used for verification
-  // load_root_certificates(ctx);
-
-  ctx.set_default_verify_paths();
-  ctx.set_verify_mode(ssl::verify_none);  //!!!
+  tls::client_context_ptr ctx =
+      tls_ctx ? tls_ctx : as->get_tls_client_context();
 
   using stream_type =
       beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
@@ -38,8 +33,9 @@ websocket_ptr make_websocket_connection_ssl(service_ptr as,
       std::to_string(scheme.port()),
       scheme.target().length() ? scheme.target() : "/");
 
+  new_ws->tls_context_holder = ctx;
   new_ws->ws = std::make_shared<stream_type>(
-      asio::make_strand(as->get_io_service()), ctx);
+      asio::make_strand(as->get_io_service()), ctx->native());
 
   // Set the timeout for the operation
   beast::get_lowest_layer(*new_ws->ws)
@@ -48,9 +44,8 @@ websocket_ptr make_websocket_connection_ssl(service_ptr as,
   internal::socket::async_connect(beast::get_lowest_layer(*new_ws->ws), results)
       .get();
 
-  internal::ssl::async_handshake(new_ws->ws->next_layer(),
-                                 ssl::stream_base::client)
-      .get();
+  internal::tls::client_handshake(new_ws->ws->next_layer(), *ctx,
+                                  scheme.host());
 
   // Turn off the timeout on the tcp_stream, because
   // the websocket stream has its own timeout system.
@@ -70,8 +65,9 @@ websocket_ptr make_websocket_connection_ssl(service_ptr as,
 
   // Perform the websocket handshake
   if (scheme.port() == 80 || scheme.port() == 443)
-    internal::websocket::async_handshake(*new_ws->ws, scheme.host(),
-                                         scheme.target())
+    internal::websocket::async_handshake(
+        *new_ws->ws, scheme.host(),
+        scheme.target().length() ? scheme.target() : "/")
         .get();
   else
     internal::websocket::async_handshake(

@@ -9,10 +9,13 @@ add_library(${PROJECT_NAME}
     http_websocket.cpp
     http_websocket_plain.cpp
     http_websocket_ssl.cpp
+    tls.cpp
 )
 
 if(LIBASYIK_ENABLE_SSL_SERVER)
     target_sources(${PROJECT_NAME} PRIVATE http_server_ssl.cpp)
+    # PUBLIC so that consumers (including installed ones) see make_https_server
+    target_compile_definitions(${PROJECT_NAME} PUBLIC LIBASYIK_ENABLE_SSL_SERVER=1)
 endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
@@ -57,7 +60,9 @@ if(WIN32)
     target_compile_definitions(${PROJECT_NAME} PUBLIC
         _WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX NOGDI)
     # winmm: timeBeginPeriod() in service::run()
-    target_link_libraries(${PROJECT_NAME} winmm)
+    # crypt32: Windows certificate store access in tls_win_certstore.cpp
+    target_sources(${PROJECT_NAME} PRIVATE tls_win_certstore.cpp)
+    target_link_libraries(${PROJECT_NAME} winmm crypt32)
 endif()
 
 if(MSVC)

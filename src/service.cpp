@@ -13,6 +13,7 @@
 #include "aixlog.hpp"
 #include "boost/fiber/all.hpp"
 #include "libasyik/asyik_round_robin.hpp"
+#include "libasyik/tls.hpp"
 
 namespace ip = boost::asio::ip;
 namespace asio = boost::asio;
@@ -39,6 +40,12 @@ service::service(struct service::private_&&)
         AixLog::Log::init<AixLog::SinkCout>(AixLog::Severity::info);
   fibers::use_scheduling_algorithm<asyik::asyik_round_robin>();
   execute_task_count = 0;
+}
+
+tls::client_context_ptr service::get_tls_client_context() const
+{
+  if (auto ctx = std::atomic_load(&tls_client_context)) return ctx;
+  return tls::default_client_context();
 }
 
 service_ptr make_service()

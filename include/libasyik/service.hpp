@@ -154,6 +154,15 @@ class service : public std::enable_shared_from_this<service> {
   static service_ptr get_current_service() { return active_service.lock(); }
 
   boost::asio::io_context& get_io_service() { return io_service; };
+
+  // TLS client context used by https:// and wss:// requests made through this
+  // service when the call does not pass one. nullptr (the default) means
+  // tls::default_client_context().
+  void set_tls_client_context(tls::client_context_ptr ctx)
+  {
+    std::atomic_store(&tls_client_context, std::move(ctx));
+  }
+  tls::client_context_ptr get_tls_client_context() const;
   static void terminate();
 
   static std::chrono::time_point<std::chrono::high_resolution_clock>
@@ -186,6 +195,7 @@ class service : public std::enable_shared_from_this<service> {
   boost::fibers::condition_variable terminate_req_cond;
   boost::fibers::mutex terminate_req_mtx;
   pooled_guarded_stack fiber_stack_pool_;
+  tls::client_context_ptr tls_client_context;
 
  public:
   friend service_ptr make_service();
