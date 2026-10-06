@@ -1,6 +1,9 @@
 // libasyik soak runner. See tests/soak/README.md.
 
+#include <arpa/inet.h>
 #include <dirent.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -83,7 +86,34 @@ static std::atomic<uint16_t> port_counter{0};
 // below the Linux ephemeral range (32768+), where client sockets could hold it
 static uint16_t port_base = 21100;
 
-uint16_t next_port() { return port_base + (port_counter++ % 800); }
+// true when 127.0.0.1:port can be bound for both TCP and UDP right now
+static bool port_free(uint16_t port)
+{
+  for (int type : {SOCK_STREAM, SOCK_DGRAM}) {
+    int fd = ::socket(AF_INET, type, 0);
+    if (fd < 0) return false;
+    int one = 1;
+    // TIME_WAIT leftovers of our own servers do not block a listen socket
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool ok = ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
+    ::close(fd);
+    if (!ok) return false;
+  }
+  return true;
+}
+
+uint16_t next_port()
+{
+  for (int attempt = 0; attempt < 800; attempt++) {
+    uint16_t port = port_base + (port_counter++ % 800);
+    if (port_free(port)) return port;
+  }
+  throw std::runtime_error("no free port in the soak port range");
+}
 
 }  // namespace soak
 
