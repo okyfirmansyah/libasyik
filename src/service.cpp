@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <regex>
 #ifdef _WIN32
 #include <windows.h>
@@ -230,38 +231,45 @@ void service::run(bool stop_on_complete)
 
 void service::init_workers()
 {
-  // Get thread multiplier from environment variable, default to 5
-  int multiplier = 5;
-  const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
-  if (env_multiplier != nullptr) {
-    multiplier = std::atoi(env_multiplier);
-    if (multiplier <= 0) {
-      multiplier = 5;  // fallback to default if invalid value
+  // async() calls this when the pool is not up yet, which several threads
+  // can see at once: each used to start its own pool
+  static std::once_flag once;
+  std::call_once(once, []() {
+    // Get thread multiplier from environment variable, default to 5
+    int multiplier = 5;
+    const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
+    if (env_multiplier != nullptr) {
+      multiplier = std::atoi(env_multiplier);
+      if (multiplier <= 0) {
+        multiplier = 5;  // fallback to default if invalid value
+      }
     }
-  }
 
-  int pool_size = std::thread::hardware_concurrency() * multiplier;
-  std::atomic_store(
-      &tasks,
-      std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
-  is_workers_initiated(true);
+    int pool_size = std::thread::hardware_concurrency() * multiplier;
+    std::atomic_store(
+        &tasks,
+        std::make_shared<fibers::buffered_channel<std::function<void()>>>(
+            1024));
+    is_workers_initiated(true);
 
-  for (std::size_t i = 0; i < (size_t)pool_size; ++i) {
-    std::thread th([]() {
-      std::function<void()> tsk;
-      auto safe_tasks = std::atomic_load(&tasks);
-      while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk)) {
-        async_queue_size--;
-        fiber fb([tsk_in = std::move(tsk)]() {
-          async_task_started++;
-          tsk_in();
-          async_task_terminated++;
-        });
+    for (std::size_t i = 0; i < (size_t)pool_size; ++i) {
+      std::thread th([]() {
+        std::function<void()> tsk;
+        auto safe_tasks = std::atomic_load(&tasks);
+        while (boost::fibers::channel_op_status::closed !=
+               safe_tasks->pop(tsk)) {
+          async_queue_size--;
+          fiber fb([tsk_in = std::move(tsk)]() {
+            async_task_started++;
+            tsk_in();
+            async_task_terminated++;
+          });
 
-        fb.detach();
-      };
-    });
-    th.detach();
-  };
+          fb.detach();
+        };
+      });
+      th.detach();
+    };
+  });
 }
 }  // namespace asyik
