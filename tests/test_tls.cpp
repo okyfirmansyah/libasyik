@@ -505,7 +505,11 @@ TEST_CASE("TLS against public endpoints", "[tls][external]")
 
       expect("https://tls-v1-2.badssl.com:1012/", X509_V_OK);
       expect("https://sha256.badssl.com/", X509_V_OK);
-      expect("https://expired.badssl.com/", X509_V_ERR_CERT_HAS_EXPIRED);
+      // Only "rejected": this certificate chains to a retired root that some
+      // trust stores (e.g. the Windows CI image) lack, so OpenSSL may report
+      // the missing issuer before the expiry. Exact reasons are covered by
+      // the local tests.
+      expect("https://expired.badssl.com/", -1);
       expect("https://wrong.host.badssl.com/", X509_V_ERR_HOSTNAME_MISMATCH);
       expect("https://self-signed.badssl.com/", -1);
       expect("https://untrusted-root.badssl.com/", -1);
