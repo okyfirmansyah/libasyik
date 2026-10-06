@@ -25,9 +25,15 @@
 #include <boost/asio/packaged_task.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/system_executor.hpp>
+#include <boost/beast/core/error.hpp>
+#include <boost/beast/http/error.hpp>
+#include <boost/beast/websocket/error.hpp>
+#include <boost/fiber/future.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
 #include <tuple>
+
+#include "../../error.hpp"
 
 namespace boost {
 namespace asio {
