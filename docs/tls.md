@@ -21,9 +21,10 @@ No code is needed for public servers:
 auto req = asyik::http_easy_request(as, "GET", "https://example.com/");
 ```
 
-### Upgrading from older versions
+### Upgrading to 1.9.0
 
-Existing code compiles unchanged; these behaviours changed:
+Code written for 1.8.x and earlier compiles unchanged; these behaviours
+changed:
 
 - **Clients verify server certificates.** Earlier releases accepted any
   certificate. Requests to servers with self-signed, expired or mismatching
