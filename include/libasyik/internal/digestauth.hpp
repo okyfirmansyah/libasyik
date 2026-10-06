@@ -62,13 +62,19 @@ class digest_authenticator {
     m_authorization.append(m_nonce.to_string());
     m_authorization.append("\", uri=\"");
     m_authorization.append(m_uri.to_string());
-    m_authorization.append("\", qop=");
-    m_authorization.append(m_qop == AuthInt ? "auth-int" : "auth");
-    m_authorization.append(", algorithm=MD5, nc=");
-    m_authorization.append(m_nonceCount);
-    m_authorization.append(", cnonce=\"");
-    m_authorization.append(m_cnonce);
-    m_authorization.append("\", response=\"");
+    // without qop (RFC 2069) the response hash has no nc/cnonce, so they
+    // must not be announced either
+    if (m_qop != None) {
+      m_authorization.append("\", qop=");
+      m_authorization.append(m_qop == AuthInt ? "auth-int" : "auth");
+      m_authorization.append(", algorithm=MD5, nc=");
+      m_authorization.append(m_nonceCount);
+      m_authorization.append(", cnonce=\"");
+      m_authorization.append(m_cnonce);
+      m_authorization.append("\", response=\"");
+    } else {
+      m_authorization.append("\", algorithm=MD5, response=\"");
+    }
     m_authorization.append(m_response);
     if (!m_opaque.empty()) {
       m_authorization.append("\", opaque=\"");
