@@ -1,5 +1,16 @@
 GENERAL/Service:
 -make aixlog sync asynchronous(sync all sink to a dedicated thread)
+-a fiber blocked forever (e.g. on a promise nobody fulfils) survives
+ service::run()'s forced exit, and Boost.Fiber then hangs the thread at exit;
+ at least log it at ERROR with that consequence, and document it
+-fiber stack size is fixed (128KB default); make it configurable per service
+
+SOAK/TESTING (see tests/soak/README.md):
+-AddressSanitizer needs Boost built with context-impl=ucontext and
+ BOOST_USE_ASAN; without it ASan crashes even on plain Boost.Fiber programs
+-digest auth: auth-int hashes the 401 body instead of H(request body), and
+ MD5-sess uses the raw HA1 where RFC 7616/curl/Apache use hex; the header
+ always says algorithm=MD5
 
 HTTP:
 -http test network negative case(host not found, dns not found, no connection, timeouts)
@@ -33,6 +44,9 @@ WEBSOCKET:
 
 SOCI:
 -tidy up SOCI's CMakeList
+-sessions are only checked by the periodic health check: after a backend
+ dies, every query on that session fails until the next check (validate or
+ reconnect on checkout instead)
 
 Important Modules:
 -Socket TCP/UDP
