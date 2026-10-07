@@ -638,3 +638,194 @@ TEST_CASE("scheduler stop terminates multiple fibers at suspension points",
 }
 
 }  // namespace asyik
+TEST_CASE("service run() returns when a fiber ignores the stop request",
+          "[service][scheduler_stop]")
+{
+  // boost::this_fiber::yield() is not an interruption point, so this fiber
+  // survives both the graceful and the forced stop phase (500ms each)
+  auto as = asyik::make_service();
+  std::atomic<bool> finished{false};
+
+  as->execute([as, &finished]() {
+    as->execute([&finished]() {
+      auto until =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+      while (std::chrono::steady_clock::now() < until)
+        boost::this_fiber::yield();
+      finished = true;
+    });
+    asyik::sleep_for(std::chrono::milliseconds(10));
+    as->stop();
+  });
+
+  auto start = std::chrono::steady_clock::now();
+  as->run();
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  REQUIRE(!finished);
+  REQUIRE(elapsed >= std::chrono::milliseconds(900));
+  REQUIRE(elapsed < std::chrono::milliseconds(1450));
+
+  // let the leftover fiber finish on this thread before the next test
+  while (!finished) boost::this_fiber::sleep_for(std::chrono::milliseconds(10));
+}
+
+TEST_CASE("async() statistics", "[service]")
+{
+  auto as = asyik::make_service();
+  auto before = asyik::service::get_async_stats();
+
+  as->execute([as, before]() {
+    for (int i = 0; i < 20; i++)
+      REQUIRE(as->async([i]() { return i * 2; }).get() == i * 2);
+    REQUIRE_THROWS_AS(
+        as->async([]() { throw std::runtime_error("boom"); }).get(),
+        std::runtime_error);
+
+    // the counters are updated after the result is delivered
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    asyik::async_stats now;
+    do {
+      asyik::sleep_for(std::chrono::milliseconds(5));
+      now = asyik::service::get_async_stats();
+    } while (now.task_terminated - before.task_terminated < 21 &&
+             std::chrono::steady_clock::now() < deadline);
+
+    REQUIRE(now.task_started - before.task_started >= 21);
+    REQUIRE(now.task_terminated - before.task_terminated >= 21);
+    REQUIRE(now.task_error - before.task_error >= 1);
+    as->stop();
+  });
+  as->run();
+}
+
+TEST_CASE("use_fiber_future with a packaged function", "[service]")
+{
+  auto as = asyik::make_service();
+
+  as->execute([as]() {
+    boost::asio::steady_timer t(as->get_io_service());
+
+    // the function's result becomes the future's value...
+    t.expires_after(std::chrono::milliseconds(1));
+    auto value = t.async_wait(asyik::use_fiber_future(
+        [](boost::system::error_code ec) { return ec ? -1 : 42; }));
+    REQUIRE(value.get() == 42);
+
+    // ...and what it throws, the future's exception
+    t.expires_after(std::chrono::milliseconds(1));
+    auto thrown = t.async_wait(
+        asyik::use_fiber_future([](boost::system::error_code) -> int {
+          throw std::runtime_error("from handler");
+        }));
+    REQUIRE_THROWS_AS(thrown.get(), std::runtime_error);
+
+    // plain token: an error code becomes a system_error
+    t.expires_after(std::chrono::hours(1));
+    auto cancelled = t.async_wait(asyik::use_fiber_future);
+    t.cancel();
+    try {
+      cancelled.get();
+      FAIL("expected operation_aborted");
+    } catch (boost::system::system_error& e) {
+      REQUIRE(e.code() == boost::asio::error::operation_aborted);
+    }
+
+    as->stop();
+  });
+  as->run();
+}
+
+TEST_CASE("async operations started while run() drains still complete",
+          "[service][scheduler_stop]")
+{
+  // At stop() the only fiber is sleeping, so the io_context runs out of work
+  // and stops itself while run() drains. The timer wait the fiber starts
+  // afterwards must still complete (it used to hang until the forced exit,
+  // and the leftover fiber then hung the thread at exit).
+  auto as = asyik::make_service();
+  std::atomic<bool> done{false};
+
+  as->execute([as, &done]() {
+    as->execute([as, &done]() {
+      boost::this_fiber::sleep_for(std::chrono::milliseconds(50));
+      boost::asio::steady_timer t(as->get_io_service(),
+                                  std::chrono::milliseconds(1));
+      t.async_wait(asyik::use_fiber_future).get();
+      done = true;
+    });
+    asyik::sleep_for(std::chrono::milliseconds(5));
+    as->stop();
+  });
+
+  auto start = std::chrono::steady_clock::now();
+  as->run();
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  REQUIRE(done);
+  // finished in the graceful phase, not through the forced exit
+  REQUIRE(elapsed < std::chrono::milliseconds(450));
+}
+
+namespace {
+// counts live instances, to see whether an argument still exists when the
+// task runs
+struct lifetime_tracker {
+  // atomic: async() copies are made and destroyed on worker threads
+  static std::atomic<int> live;
+  lifetime_tracker() { live++; }
+  lifetime_tracker(const lifetime_tracker&) { live++; }
+  lifetime_tracker(lifetime_tracker&&) { live++; }
+  ~lifetime_tracker() { live--; }
+};
+std::atomic<int> lifetime_tracker::live{0};
+}  // namespace
+
+TEST_CASE("execute() and async() keep temporary arguments alive",
+          "[service]")
+{
+  auto as = asyik::make_service();
+
+  as->execute([as]() {
+    // stop the service also when a REQUIRE fails, so a failure cannot hang
+    struct stopper {
+      asyik::service_ptr as;
+      ~stopper() { as->stop(); }
+    } stop_on_exit{as};
+
+    // the task runs after execute()/async() returned, when the temporaries
+    // of the calling expression are gone
+    auto e = as->execute(
+        [](const lifetime_tracker&) { return lifetime_tracker::live.load(); },
+        lifetime_tracker{});
+    REQUIRE(e.get() >= 1);
+    auto a = as->async(
+        [](const lifetime_tracker&) { return lifetime_tracker::live.load(); },
+        lifetime_tracker{});
+    REQUIRE(a.get() >= 1);
+    // the task (and the argument it owns) is destroyed shortly after the
+    // result is delivered, on the worker thread
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (lifetime_tracker::live != 0 &&
+           std::chrono::steady_clock::now() < deadline)
+      asyik::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(lifetime_tracker::live == 0);
+
+    auto s = as->execute([](const std::string& v) { return v; },
+                         std::string(1000, 'x'));
+    REQUIRE(s.get() == std::string(1000, 'x'));
+
+    // move-only temporaries
+    auto u = as->async([](std::unique_ptr<int> v) { return *v; },
+                       std::make_unique<int>(7));
+    REQUIRE(u.get() == 7);
+
+    // lvalues are still passed by reference
+    int counter = 0;
+    as->execute([](int& c) { c = 42; }, counter).get();
+    REQUIRE(counter == 42);
+    as->async([](int& c) { c++; }, counter).get();
+    REQUIRE(counter == 43);
+  });
+  as->run();
+}

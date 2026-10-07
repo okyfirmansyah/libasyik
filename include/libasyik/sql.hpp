@@ -1,8 +1,10 @@
 #ifndef LIBASYIK_ASYIK_SQL_HPP
 #define LIBASYIK_ASYIK_SQL_HPP
 
+#include <atomic>
 #include <functional>
 #include <list>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -161,8 +163,10 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
   void query(string_view s, Args&&... args)
   {
     service
-        ->async([&args..., s, ses = soci_session.get()]() {
-          ((*ses << s), ..., std::forward<Args>(args));
+        ->async([&args..., s, self = this]() {
+          std::lock_guard<std::mutex> l(self->conn_mtx);
+          ((*self->soci_session << s), ..., std::forward<Args>(args));
+          self->dispatch_notifications();
         })
         .get();
   };
@@ -187,9 +191,12 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
   soci::rowset<soci::row> query_rows(string_view s, Args&&... args)
   {
     return service
-        ->async([&args..., s, ses = soci_session.get()]() {
+        ->async([&args..., s, self = this]() {
+          std::lock_guard<std::mutex> l(self->conn_mtx);
           soci::rowset<soci::row> rs =
-              ((ses->prepare << s), ..., std::forward<Args>(args));
+              ((self->soci_session->prepare << s), ...,
+               std::forward<Args>(args));
+          self->dispatch_notifications();
           return rs;
         })
         .get();
@@ -217,7 +224,20 @@ class sql_session : public std::enable_shared_from_this<sql_session> {
   using notify_stream_type = asio::posix::stream_descriptor;
 #endif
   std::unique_ptr<notify_stream_type> notify_stream;
-  bool notify_running = false;
+  // retries the watcher while a query holds the connection
+  std::unique_ptr<asio::steady_timer> notify_retry;
+  std::atomic<bool> notify_running{false};
+
+ private:
+  // libpq connections are not thread-safe: queries run on async() workers
+  // while the LISTEN watcher reads notifications on the service thread.
+  // Every use of the connection holds this lock.
+  std::mutex conn_mtx;
+
+  // Hands notifications libpq has received to their handlers; the caller
+  // holds conn_mtx. Queries call it too, since a query reads whatever
+  // arrives on the connection while it runs.
+  void dispatch_notifications();
 
   friend class sql_pool;
 };

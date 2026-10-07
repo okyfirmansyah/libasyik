@@ -19,6 +19,7 @@
 #include <boost/asio/detail/config.hpp>
 #include <boost/asio/detail/push_options.hpp>
 #include <boost/asio/detail/type_traits.hpp>
+#include <boost/asio/use_future.hpp>
 #include <memory>
 
 namespace boost {

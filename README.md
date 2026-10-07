@@ -202,41 +202,26 @@ As example use following CMakeLists.txt template to invoke Libasyik using **find
 ```
 cmake_minimum_required(VERSION 3.14)
 project(test_asyik)
-SET(LIBASYIK_ENABLE_SOCI ON)  # if SOCI database support is desired
-set(CMAKE_CXX_STANDARD 11)    # set to 14 or 17 when available
 
 add_executable(${PROJECT_NAME} test.cpp) # add more source code here
 
-#######
-#include other dependencies
-#######
-
-find_package(libasyik)
-if(libasyik_FOUND)
-    target_include_directories(${PROJECT_NAME} PUBLIC ${libasyik_INCLUDE_DIR})
-    target_link_libraries(${PROJECT_NAME} libasyik)
-endif()
-
-find_package(Boost COMPONENTS context fiber REQUIRED)
-if(Boost_FOUND)
-    target_include_directories(${PROJECT_NAME} PUBLIC ${Boost_INCLUDE_DIR})
-    target_link_libraries(${PROJECT_NAME} Boost::fiber Boost::context)
-endif()
-
-find_package(SOCI REQUIRED) # if SOCI database support is desired
-if(SOCI_FOUND)
-    target_include_directories(${PROJECT_NAME} PUBLIC /usr/include/postgresql)
-    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci)
-    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci/postgresql)
-    target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/soci/sqlite3)
-    target_link_libraries(${PROJECT_NAME} SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
-endif()
-
-find_package(Threads REQUIRED)
-target_link_libraries(${PROJECT_NAME} Threads::Threads)
-
+# libasyik's own dependencies must be found before libasyik itself
+find_package(Boost COMPONENTS context fiber date_time url REQUIRED)
 find_package(OpenSSL REQUIRED)
-target_link_libraries(${PROJECT_NAME} OpenSSL::SSL)
+find_package(Threads REQUIRED)
+find_package(SOCI REQUIRED) # only if libasyik was built with SOCI support
+find_package(libasyik REQUIRED)
+
+# brings in libasyik's include paths (including aixlog, cppcodec and SOCI),
+# C++17 and its dependencies
+target_link_libraries(${PROJECT_NAME} libasyik)
+```
+
+Libasyik can also be built as part of your project, e.g. as a git submodule:
+```
+set(LIBASYIK_ENABLE_SOCI OFF CACHE BOOL "" FORCE) # if no database support is needed
+add_subdirectory(external/libasyik)
+target_link_libraries(${PROJECT_NAME} libasyik)
 ```
 ---
 # Credits

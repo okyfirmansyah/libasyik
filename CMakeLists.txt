@@ -4,9 +4,25 @@ project(libasyik)
 SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
 SET(LIBASYIK_ENABLE_SSL_SERVER ON CACHE BOOL "Libasyik Enable SSL/HTTPS Server Support")
 
+# Instrument both the library and the tests for gcov/lcov. The library must be
+# instrumented too, otherwise src/*.cpp never shows up in the coverage report.
+# -fprofile-update=atomic: counters are hit from many threads (async() worker
+# pool, multi-service tests); plain counters race and go negative.
+option(LIBASYIK_ENABLE_COVERAGE "Build libasyik and its tests with coverage instrumentation" OFF)
+if(LIBASYIK_ENABLE_COVERAGE AND NOT MSVC)
+    set(LIBASYIK_COVERAGE_FLAGS -O0 -g --coverage -fprofile-update=atomic)
+endif()
+
 add_subdirectory(external/Catch2)
 add_subdirectory(src)
 add_subdirectory(tests)
+
+# Optional soak (long-running stability) test executable, run locally:
+#   cmake -DLIBASYIK_BUILD_SOAK=ON ..  &&  ./tests/soak/libasyik_soak --help
+option(LIBASYIK_BUILD_SOAK "Build the libasyik_soak stability test executable" OFF)
+if(LIBASYIK_BUILD_SOAK)
+    add_subdirectory(tests/soak)
+endif()
 
 # Optional benchmark executables (built in Release/-O3 regardless of parent build type)
 # Enable with:  cmake -DLIBASYIK_BUILD_BENCHMARKS=ON ..
@@ -21,9 +37,14 @@ target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CUR
 target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
-target_include_directories(${PROJECT_NAME} PRIVATE external/cppcodec)
-target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
+# aixlog and cppcodec are header-only and used by libasyik's public headers
+# (service.hpp, internal/digestauth.hpp), so consumers need them too: from the
+# source tree when libasyik is added with add_subdirectory(), from the
+# installed copy (see install() below) after find_package().
+target_include_directories(${PROJECT_NAME} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/external/aixlog/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/external/cppcodec>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 

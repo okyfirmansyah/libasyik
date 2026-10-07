@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 
 #include "common.hpp"
 #include "libasyik/asyik_fwd.hpp"
@@ -21,6 +22,9 @@ struct single_thread {
   using mutex_type = int;
   template <typename T>
   using atomic_type = T;
+  // get()/at() return a reference into the cache
+  template <typename T>
+  using result_type = T&;
 };
 
 template <typename MutexType>
@@ -29,6 +33,11 @@ struct multi_thread {
   using mutex_type = MutexType;
   template <typename T>
   using atomic_type = std::atomic<T>;
+  // get()/at() return a copy made under the lock: a reference would outlive
+  // the lock while other threads put, erase, prune or move the entry (get()
+  // moves it to a fresher segment). Use visit() for in-place access.
+  template <typename T>
+  using result_type = T;
 };
 
 template <class Key, class T, int expiry, int segments, typename thread_policy>
@@ -45,90 +54,106 @@ class memcache : public std::enable_shared_from_this<
 
   ~memcache() {}
 
-  void put(const Key& k, T&& v)
+  using value_ref = typename thread_policy::template result_type<T>;
+
+  // Stores v under k (replacing any previous value) with a fresh lifetime.
+  void put(const Key& k, T v)
   {
     typename thread_policy::guard_type t(mtx);
-
-    // delete old key
-    for (auto& m : map_list) {
-      m.second.erase(k);
-    }
-
-    int64_t current_ms = now_ms();
-    int64_t expiry_at = current_ms + expiry_ms;
-
-    if ((map_list.begin() != map_list.end()) &&
-        (map_list.begin()->first >= expiry_at)) {
-      map_list.begin()->second[k] = std::forward<T>(v);
-    } else  // create new cluster
-    {
-      std::map<Key, T> m;
-      m.emplace(k, std::forward<T>(v));
-      map_list[expiry_at + segment_ms] = std::move(m);
-    }
+    insert(k, std::move(v));
   }
 
-  void erase(const Key& k)
+  // Removes k; returns whether it was there.
+  bool erase(const Key& k)
   {
     typename thread_policy::guard_type t(mtx);
-
-    for (auto& m : map_list) {
-      m.second.erase(k);
-    }
+    bool found = false;
+    for (auto& m : map_list) found |= m.second.erase(k) > 0;
+    return found;
   }
 
   void clear()
   {
     typename thread_policy::guard_type t(mtx);
-
     map_list.clear();
   }
 
-  T& at(const Key& k)
+  // Value of k with its lifetime extended; throws std::out_of_range when
+  // missing or expired. A reference for make_memcache(), a copy for
+  // make_memcache_mt() (see multi_thread).
+  value_ref get(const Key& k)
   {
-    int64_t current_ms = now_ms();
-
     typename thread_policy::guard_type t(mtx);
-    for (auto& m : map_list) {
-      if (current_ms > m.first) break;
-      if (m.second.count(k) && (m.first >= current_ms)) {
-        return m.second.at(k);
-      }
-    }
+    if (T* v = touch(k)) return *v;
     throw std::out_of_range("item not found/out of range in memcache!");
   }
 
-  const T& at(const Key& k) const { return at(k); }
-
-  T& get(const Key& k)
+  // Like get(), but leaves the lifetime alone.
+  value_ref at(const Key& k)
   {
     typename thread_policy::guard_type t(mtx);
-    prune();
-
-    for (auto& m : map_list) {
-      if (m.second.count(k)) {
-        int64_t current_ms = now_ms();
-        int64_t expiry_at = current_ms + expiry_ms;
-
-        if ((map_list.begin() != map_list.end()) &&
-            (map_list.begin()->first >= expiry_at)) {
-          if (map_list.begin()->first != m.first) {
-            map_list.begin()->second[k] = std::move(m.second.at(k));
-            m.second.erase(k);
-          }
-          return map_list.begin()->second.at(k);
-        } else  // create new cluster
-        {
-          std::map<Key, T> c;
-          c.emplace(k, std::move(m.second.at(k)));
-
-          map_list[expiry_at + segment_ms] = std::move(c);
-          m.second.erase(k);
-          return map_list.at(expiry_at + segment_ms).at(k);
-        }
-      }
-    }
+    if (T* v = find_live(k)) return *v;
     throw std::out_of_range("item not found/out of range in memcache!");
+  }
+
+  typename thread_policy::template result_type<const T> at(const Key& k) const
+  {
+    return const_cast<memcache*>(this)->at(k);
+  }
+
+  // Like get() without the exception: a copy of the value (lifetime
+  // extended), or nullopt when missing or expired.
+  std::optional<T> try_get(const Key& k)
+  {
+    typename thread_policy::guard_type t(mtx);
+    if (T* v = touch(k)) return *v;
+    return std::nullopt;
+  }
+
+  // Whether k is present and not expired; leaves the lifetime alone.
+  bool contains(const Key& k) const
+  {
+    auto self = const_cast<memcache*>(this);
+    typename thread_policy::guard_type t(self->mtx);
+    return self->find_live(k) != nullptr;
+  }
+
+  // Value of k (lifetime extended); when missing, stores make() first. The
+  // lookup and the insertion are one step, so with make_memcache_mt()
+  // concurrent callers never both create the value. make() runs under the
+  // cache lock: keep it short.
+  template <typename F>
+  value_ref get_or_put(const Key& k, F&& make)
+  {
+    typename thread_policy::guard_type t(mtx);
+    if (T* v = touch(k)) return *v;
+    return insert(k, std::forward<F>(make)());
+  }
+
+  // Calls f(T&) under the cache lock if k is present and not expired (its
+  // lifetime is left alone); returns whether it was. The way to modify
+  // values in place, or to read non-copyable ones, in a multi-thread cache.
+  template <typename F>
+  bool visit(const Key& k, F&& f)
+  {
+    typename thread_policy::guard_type t(mtx);
+    T* v = find_live(k);
+    if (v) std::forward<F>(f)(*v);
+    return v != nullptr;
+  }
+
+  // Number of entries that are not expired.
+  size_t size() const
+  {
+    auto self = const_cast<memcache*>(this);
+    typename thread_policy::guard_type t(self->mtx);
+    int64_t current_ms = now_ms();
+    size_t n = 0;
+    for (auto& m : self->map_list) {
+      if (current_ms > m.first) break;
+      n += m.second.size();
+    }
+    return n;
   }
 
  private:
@@ -144,6 +169,54 @@ class memcache : public std::enable_shared_from_this<
     using namespace std::chrono;
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch())
         .count();
+  }
+
+  // The helpers below expect the caller to hold mtx.
+
+  // Segments are ordered youngest first; an entry is live while the segment
+  // holding it has not expired.
+  T* find_live(const Key& k)
+  {
+    int64_t current_ms = now_ms();
+    for (auto& m : map_list) {
+      if (current_ms > m.first) break;
+      auto it = m.second.find(k);
+      if (it != m.second.end()) return &it->second;
+    }
+    return nullptr;
+  }
+
+  // Segment for entries stored now: the youngest one if it still lives a
+  // full lifetime, otherwise a new one.
+  std::map<Key, T>& youngest_segment()
+  {
+    int64_t expiry_at = now_ms() + expiry_ms;
+    if (map_list.empty() || map_list.begin()->first < expiry_at)
+      return map_list[expiry_at + segment_ms];
+    return map_list.begin()->second;
+  }
+
+  T& insert(const Key& k, T&& v)
+  {
+    for (auto& m : map_list) m.second.erase(k);
+    return youngest_segment().emplace(k, std::move(v)).first->second;
+  }
+
+  // Live entry for k moved to the youngest segment (extending its lifetime),
+  // or nullptr.
+  T* touch(const Key& k)
+  {
+    prune();
+    for (auto& m : map_list) {
+      auto it = m.second.find(k);
+      if (it == m.second.end()) continue;
+      auto& young = youngest_segment();
+      if (&young == &m.second) return &it->second;
+      T& moved = young.emplace(k, std::move(it->second)).first->second;
+      m.second.erase(it);
+      return &moved;
+    }
+    return nullptr;
   }
 
   void prune()

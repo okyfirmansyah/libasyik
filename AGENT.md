@@ -368,10 +368,13 @@ server->on_http_request("/api/<path>", "GET", [limiter](auto req, auto args) {
 auto cache = asyik::make_memcache<std::string, std::string, 60, 4>(as);
 
 cache->put("key", "value");
-auto val = cache->get("key");  // extends TTL
+auto val = cache->get("key");      // extends TTL; throws std::out_of_range if missing
+if (auto v = cache->try_get("key")) { /* *v */ }  // no exception on a miss
+auto p = cache->get_or_put("key", []() { return std::string("loaded"); });
 cache->erase("key");
 
-// Thread-safe variant (uses fibers::mutex internally)
+// Thread-safe variant (uses fibers::mutex internally). get()/at()/
+// get_or_put() return copies here; use visit(key, f) to change in place.
 auto mt_cache = asyik::make_memcache_mt<std::string, std::string, 60, 4>(as);
 ```
 
@@ -468,6 +471,22 @@ target_link_libraries(my_service libasyik Boost::fiber Boost::context Threads::T
 # HTTPS server support is ON by default; turn it off to drop it
 # SET(LIBASYIK_ENABLE_SSL_SERVER OFF)
 ```
+
+## Running the Tests and Coverage
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DLIBASYIK_ENABLE_COVERAGE=ON
+cmake --build build --target libasyik_test -j4
+./build/tests/libasyik_test            # "~[sql]" skips the PostgreSQL tests
+
+# library coverage only (include/ and src/), as reported to Codecov
+lcov --capture --directory build -o all.info
+lcov --extract all.info "$PWD/include/*" "$PWD/src/*" -o lib.info
+lcov --list lib.info
+```
+
+The `[sql]` tests need PostgreSQL on localhost:5432 (user `postgres`,
+password `test`), e.g. `docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:12-alpine`.
 
 ## Required includes by feature
 

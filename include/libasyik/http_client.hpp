@@ -197,7 +197,12 @@ class http_request : public std::enable_shared_from_this<http_request> {
 
   template <typename S, typename R, typename F>
   friend boost::fibers::future<size_t> handle_client_request_response(
-      S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f);
+      S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f,
+      bool try_auth);
+
+  template <typename S, typename R, typename P, typename W>
+  friend bool handle_client_auth(S& stream, http_url_scheme& scheme, R& req,
+                                 P& empty_parser, W& write_done);
 };
 
 // Helper functions for multipart handling
@@ -207,13 +212,14 @@ inline boost::optional<std::string> deduce_boundary(
 template <typename S, typename B>
 bool find_multipart_boundary(S& stream, B& buffer, const std::string& boundary);
 
-template <typename S, typename Buf, typename BR, typename P>
-void handle_client_auth(S& stream, http_url_scheme& scheme, Buf& buffer,
-                        BR& beast_request, P& empty_parser);
+template <typename S, typename R, typename P, typename W>
+bool handle_client_auth(S& stream, http_url_scheme& scheme, R& req,
+                        P& empty_parser, W& write_done);
 
 template <typename S, typename R, typename F>
 boost::fibers::future<size_t> handle_client_request_response(
-    S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f);
+    S& stream, int timeout_ms, R& req, http_url_scheme& scheme, F& f,
+    bool try_auth);
 
 // Template implementations must be included from main http.hpp
 

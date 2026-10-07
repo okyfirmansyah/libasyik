@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <regex>
 #ifdef _WIN32
 #include <windows.h>
@@ -155,10 +156,20 @@ void service::run(bool stop_on_complete)
 
   execute_tasks->close();
 
+  // The drain phases below keep polling while fibers finish. poll() stops the
+  // io_context whenever it runs out of work (e.g. every fiber is in
+  // sleep_for), after which it returns immediately until restart(): an async
+  // operation a fiber starts after that would never complete, leaving the
+  // fiber suspended forever (and the thread hanging at exit).
+  auto drain_poll = [this]() {
+    if (io_service.stopped()) io_service.restart();
+    io_service.poll();
+  };
+
   // Phase 1: drain the task channel – give all dispatched-but-not-yet-started
   // fibers a chance to pick up their task and begin executing.
   for (int i = 0; i < 200; i++) {
-    io_service.poll();
+    drain_poll();
     boost::this_fiber::yield();
   }
 
@@ -178,7 +189,7 @@ void service::run(bool stop_on_complete)
       if (std::chrono::steady_clock::now() > graceful_deadline) {
         break;
       }
-      io_service.poll();
+      drain_poll();
       boost::this_fiber::yield();
     }
 
@@ -202,7 +213,7 @@ void service::run(bool stop_on_complete)
               << " fiber(s) still active after scheduler stop, forcing exit\n";
           break;
         }
-        io_service.poll();
+        drain_poll();
         boost::this_fiber::yield();
       }
     }
@@ -210,7 +221,7 @@ void service::run(bool stop_on_complete)
     // Final flush: any deregistrations queued by the last batch of fiber
     // completions are processed here, before the io_context is destroyed.
     for (int i = 0; i < 20; i++) {
-      io_service.poll();
+      drain_poll();
       boost::this_fiber::yield();
     }
   }
@@ -220,38 +231,45 @@ void service::run(bool stop_on_complete)
 
 void service::init_workers()
 {
-  // Get thread multiplier from environment variable, default to 5
-  int multiplier = 5;
-  const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
-  if (env_multiplier != nullptr) {
-    multiplier = std::atoi(env_multiplier);
-    if (multiplier <= 0) {
-      multiplier = 5;  // fallback to default if invalid value
+  // async() calls this when the pool is not up yet, which several threads
+  // can see at once: each used to start its own pool
+  static std::once_flag once;
+  std::call_once(once, []() {
+    // Get thread multiplier from environment variable, default to 5
+    int multiplier = 5;
+    const char* env_multiplier = std::getenv("ASYIK_THREAD_MULTIPLIER");
+    if (env_multiplier != nullptr) {
+      multiplier = std::atoi(env_multiplier);
+      if (multiplier <= 0) {
+        multiplier = 5;  // fallback to default if invalid value
+      }
     }
-  }
 
-  int pool_size = std::thread::hardware_concurrency() * multiplier;
-  std::atomic_store(
-      &tasks,
-      std::make_shared<fibers::buffered_channel<std::function<void()>>>(1024));
-  is_workers_initiated(true);
+    int pool_size = std::thread::hardware_concurrency() * multiplier;
+    std::atomic_store(
+        &tasks,
+        std::make_shared<fibers::buffered_channel<std::function<void()>>>(
+            1024));
+    is_workers_initiated(true);
 
-  for (std::size_t i = 0; i < (size_t)pool_size; ++i) {
-    std::thread th([]() {
-      std::function<void()> tsk;
-      auto safe_tasks = std::atomic_load(&tasks);
-      while (boost::fibers::channel_op_status::closed != safe_tasks->pop(tsk)) {
-        async_queue_size--;
-        fiber fb([tsk_in = std::move(tsk)]() {
-          async_task_started++;
-          tsk_in();
-          async_task_terminated++;
-        });
+    for (std::size_t i = 0; i < (size_t)pool_size; ++i) {
+      std::thread th([]() {
+        std::function<void()> tsk;
+        auto safe_tasks = std::atomic_load(&tasks);
+        while (boost::fibers::channel_op_status::closed !=
+               safe_tasks->pop(tsk)) {
+          async_queue_size--;
+          fiber fb([tsk_in = std::move(tsk)]() {
+            async_task_started++;
+            tsk_in();
+            async_task_terminated++;
+          });
 
-        fb.detach();
-      };
-    });
-    th.detach();
-  };
+          fb.detach();
+        };
+      });
+      th.detach();
+    };
+  });
 }
 }  // namespace asyik
