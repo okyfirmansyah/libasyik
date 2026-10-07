@@ -42,20 +42,21 @@ if(LIBASYIK_ENABLE_SOCI)
     add_definitions("-DLIBASYIK_ENABLE_SOCI=${LIBASYIK_ENABLE_SOCI}")
     target_sources(${PROJECT_NAME} PRIVATE sql.cpp)
     if(SOCI_FOUND)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/postgresql)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
-        target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
         target_link_libraries(${PROJECT_NAME} SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
-        if(WIN32)
-            # sql.hpp includes SOCI headers without the soci/ prefix; locate
-            # them relative to the imported target (e.g. vcpkg's include/soci)
-            get_target_property(SOCI_INCLUDE_ROOT SOCI::soci_core INTERFACE_INCLUDE_DIRECTORIES)
-            list(GET SOCI_INCLUDE_ROOT 0 SOCI_INCLUDE_ROOT)
-            target_include_directories(${PROJECT_NAME} PUBLIC
-                ${SOCI_INCLUDE_ROOT}/soci
-                ${SOCI_INCLUDE_ROOT}/soci/postgresql
-                ${SOCI_INCLUDE_ROOT}/soci/sqlite3)
+        # sql.hpp is public and includes SOCI headers without the soci/
+        # prefix; locate them relative to the imported target (e.g.
+        # /usr/local/include/soci, vcpkg's include/soci)
+        get_target_property(SOCI_INCLUDE_ROOT SOCI::soci_core INTERFACE_INCLUDE_DIRECTORIES)
+        list(GET SOCI_INCLUDE_ROOT 0 SOCI_INCLUDE_ROOT)
+        target_include_directories(${PROJECT_NAME} PUBLIC
+            ${SOCI_INCLUDE_ROOT}/soci
+            ${SOCI_INCLUDE_ROOT}/soci/postgresql
+            ${SOCI_INCLUDE_ROOT}/soci/sqlite3)
+        # SOCI's PostgreSQL header includes libpq-fe.h (Debian/Ubuntu keep it
+        # in /usr/include/postgresql)
+        find_path(LIBASYIK_LIBPQ_INCLUDE_DIR libpq-fe.h PATH_SUFFIXES postgresql)
+        if(LIBASYIK_LIBPQ_INCLUDE_DIR)
+            target_include_directories(${PROJECT_NAME} PUBLIC ${LIBASYIK_LIBPQ_INCLUDE_DIR})
         endif()
     endif()
 endif()

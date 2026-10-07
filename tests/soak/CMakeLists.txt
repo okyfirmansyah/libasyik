@@ -14,18 +14,10 @@ add_executable(libasyik_soak
 target_compile_options(libasyik_soak PRIVATE -O2 -g -UNDEBUG -Wall -Wno-unused-function -Wno-unused-variable)
 target_compile_definitions(libasyik_soak PRIVATE
     LIBASYIK_TEST_CERT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../certs")
-target_include_directories(libasyik_soak PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/..
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/aixlog/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/cppcodec)
+target_include_directories(libasyik_soak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(libasyik_soak PRIVATE libasyik)
 
 if(LIBASYIK_ENABLE_SOCI)
-    # the sql.pool scenario; same SOCI setup as the unit tests
+    # the sql.pool scenario
     target_compile_definitions(libasyik_soak PRIVATE LIBASYIK_ENABLE_SOCI=1)
-    target_include_directories(libasyik_soak PRIVATE
-        /usr/include/postgresql
-        /usr/local/include/soci
-        /usr/local/include/soci/postgresql
-        /usr/local/include/soci/sqlite3)
 endif()

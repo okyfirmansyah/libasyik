@@ -15,12 +15,6 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE LIBASYIK_TEST_CERT_DIR="${CMA
 
 if(LIBASYIK_ENABLE_SOCI)
     target_sources(${PROJECT_NAME} PRIVATE test_sql.cpp)
-    target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/postgresql)
-    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci)
-    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/postgresql)
-    target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include/soci/sqlite3)
 endif()
 
-target_include_directories(${PROJECT_NAME} PRIVATE ../external/cppcodec/)
-target_include_directories(${PROJECT_NAME} PRIVATE ../external/aixlog/include)
 target_link_libraries(${PROJECT_NAME} libasyik Catch2::Catch2)

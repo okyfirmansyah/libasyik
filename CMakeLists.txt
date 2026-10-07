@@ -37,9 +37,14 @@ target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CUR
 target_include_directories(${PROJECT_NAME} INTERFACE "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
                                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_include_directories(${PROJECT_NAME} PRIVATE external/aixlog/include)
-target_include_directories(${PROJECT_NAME} PRIVATE external/cppcodec)
-target_include_directories(${PROJECT_NAME} INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
+# aixlog and cppcodec are header-only and used by libasyik's public headers
+# (service.hpp, internal/digestauth.hpp), so consumers need them too: from the
+# source tree when libasyik is added with add_subdirectory(), from the
+# installed copy (see install() below) after find_package().
+target_include_directories(${PROJECT_NAME} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/external/aixlog/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/external/cppcodec>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external>")
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
