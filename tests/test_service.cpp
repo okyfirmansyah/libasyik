@@ -771,13 +771,14 @@ namespace {
 // counts live instances, to see whether an argument still exists when the
 // task runs
 struct lifetime_tracker {
-  static int live;
+  // atomic: async() copies are made and destroyed on worker threads
+  static std::atomic<int> live;
   lifetime_tracker() { live++; }
   lifetime_tracker(const lifetime_tracker&) { live++; }
   lifetime_tracker(lifetime_tracker&&) { live++; }
   ~lifetime_tracker() { live--; }
 };
-int lifetime_tracker::live = 0;
+std::atomic<int> lifetime_tracker::live{0};
 }  // namespace
 
 TEST_CASE("execute() and async() keep temporary arguments alive",
@@ -795,13 +796,19 @@ TEST_CASE("execute() and async() keep temporary arguments alive",
     // the task runs after execute()/async() returned, when the temporaries
     // of the calling expression are gone
     auto e = as->execute(
-        [](const lifetime_tracker&) { return lifetime_tracker::live; },
+        [](const lifetime_tracker&) { return lifetime_tracker::live.load(); },
         lifetime_tracker{});
     REQUIRE(e.get() >= 1);
     auto a = as->async(
-        [](const lifetime_tracker&) { return lifetime_tracker::live; },
+        [](const lifetime_tracker&) { return lifetime_tracker::live.load(); },
         lifetime_tracker{});
     REQUIRE(a.get() >= 1);
+    // the task (and the argument it owns) is destroyed shortly after the
+    // result is delivered, on the worker thread
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (lifetime_tracker::live != 0 &&
+           std::chrono::steady_clock::now() < deadline)
+      asyik::sleep_for(std::chrono::milliseconds(1));
     REQUIRE(lifetime_tracker::live == 0);
 
     auto s = as->execute([](const std::string& v) { return v; },
