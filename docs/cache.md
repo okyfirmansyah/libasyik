@@ -88,3 +88,14 @@ Every call takes the cache's internal lock (a `boost::fibers::mutex`, so a fiber
 `get_or_put()` looks up and inserts in one step: when several threads ask for the same missing key, `make()` runs once and they all get its result. `make()` runs under the cache lock, so keep it short.
 
 Entries expire, and their destructors run, on whichever thread happens to prune the cache.
+
+### Upgrading to 1.10.0
+
+Only code using **make_memcache_mt()** is affected:
+
+- `get()`, `at()` (and the new `get_or_put()`) return a copy instead of a
+  reference, which another thread could invalidate at any time. `auto v =
+  cache->get(k)` compiles unchanged; `T& v = cache->get(k)` no longer
+  compiles, and changing the value through the returned object no longer
+  changes the cached one: use `visit(k, f)` for in-place changes.
+- `erase()` returns whether the key was there (it returned `void`).
