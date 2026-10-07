@@ -1,3 +1,6 @@
+#include <atomic>
+#include <cstdlib>
+#include <iostream>
 #include <map>
 #include <set>
 #include <thread>
@@ -540,6 +543,74 @@ TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
     LOG(INFO) << "LISTEN watcher test: done, stopping the service\n";
   });
   LOG(INFO) << "LISTEN watcher test: service stopped\n";
+}
+
+TEST_CASE("Queries on a listening session while notifications arrive", "[sql]")
+{
+  // The LISTEN watcher and the session's queries share one libpq connection.
+  // The watcher used to read from it while a query waited for its reply on a
+  // worker thread, stealing the reply: the query then hung for good.
+  auto as = asyik::make_service();
+  auto pool = make_sql_pool(sql_backend_postgresql, admin_conn, 2);
+  std::atomic<int> queries{0};
+
+  run_in_service(as, [=, &queries]() {
+    auto listener = pool->get_session(as);
+    // shared: queued notifications may run after this body has returned
+    auto received = std::make_shared<std::atomic<int>>(0);
+    listener->listen(
+        "asyik_race",
+        [received](const std::string&, const std::string&) { (*received)++; });
+
+    // notifications keep arriving on the listener's connection
+    std::atomic<bool> sending{true};
+    auto sender = as->execute([&]() {
+      auto ses = pool->get_session(as);
+      while (sending) ses->query("NOTIFY asyik_race, 'x'");
+    });
+
+    // A stuck query cannot be interrupted, and the test would just hang:
+    // name the problem and end the process instead.
+    std::atomic<bool> done{false};
+    std::thread watchdog([&queries, &done]() {
+      int last = -1;
+      auto last_change = std::chrono::steady_clock::now();
+      while (!done) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (queries != last) {
+          last = queries;
+          last_change = std::chrono::steady_clock::now();
+        } else if (std::chrono::steady_clock::now() - last_change >
+                   std::chrono::seconds(5)) {
+          std::cerr << "FATAL: query on a listening session stalled after "
+                    << last << " queries\n";
+          std::_Exit(1);
+        }
+      }
+    });
+
+    struct watchdog_stopper {
+      std::atomic<bool>& done;
+      std::thread& thread;
+      ~watchdog_stopper()
+      {
+        done = true;
+        thread.join();
+      }
+    } stop_watchdog{done, watchdog};
+
+    while (queries < 1500) {
+      int one = 0;
+      listener->query("SELECT 1", soci::into(one));
+      REQUIRE(one == 1);
+      queries++;
+    }
+
+    sending = false;
+    sender.get();
+    REQUIRE(wait_for([&]() { return *received > 0; }));
+    listener->unlisten("asyik_race");
+  });
 }
 
 }  // namespace asyik

@@ -78,138 +78,155 @@ sql_session_ptr sql_pool::get_session(service_ptr as)
   return session;
 }
 
+// libpq connection of a PostgreSQL session; nullptr for other backends
+static PGconn* pg_conn(soci::session& ses)
+{
+  if (ses.get_backend_name() != "postgresql") return nullptr;
+  auto backend =
+      static_cast<soci::postgresql_session_backend*>(ses.get_backend());
+  return backend ? backend->conn_ : nullptr;
+}
+
 void sql_session::begin()
 {
-  service->async([ses = soci_session.get()]() { ses->begin(); }).get();
+  service
+      ->async([self = this]() {
+        std::lock_guard<std::mutex> l(self->conn_mtx);
+        self->soci_session->begin();
+        self->dispatch_notifications();
+      })
+      .get();
 }
 
 void sql_session::commit()
 {
-  service->async([ses = soci_session.get()]() { ses->commit(); }).get();
+  service
+      ->async([self = this]() {
+        std::lock_guard<std::mutex> l(self->conn_mtx);
+        self->soci_session->commit();
+        self->dispatch_notifications();
+      })
+      .get();
 }
 
 void sql_session::rollback()
 {
-  service->async([ses = soci_session.get()]() { ses->rollback(); }).get();
+  service
+      ->async([self = this]() {
+        std::lock_guard<std::mutex> l(self->conn_mtx);
+        self->soci_session->rollback();
+        self->dispatch_notifications();
+      })
+      .get();
+}
+
+void sql_session::dispatch_notifications()
+{
+  if (!notify_running) return;
+  PGconn* conn = pg_conn(*soci_session);
+  if (!conn) return;
+
+  PGnotify* n = nullptr;
+  while ((n = PQnotifies(conn)) != nullptr) {
+    std::string ch = n->relname ? n->relname : std::string();
+    std::string payload = n->extra ? n->extra : std::string();
+    PQfreemem(n);
+
+    notify_handler_t handler;
+    {
+      std::lock_guard<fibers::mutex> l(notify_mtx);
+      auto it = notify_handlers.find(ch);
+      if (it != notify_handlers.end()) handler = it->second;
+    }
+    if (handler && service)
+      service->execute([handler, ch, payload]() { handler(ch, payload); });
+  }
+}
+
+// Runs a LISTEN/UNLISTEN command; failures (e.g. a dead connection) are
+// ignored, the watcher notices those on its own.
+static void run_listen_command(service_ptr service, std::mutex& conn_mtx,
+                               soci::session& ses, const std::string& sql)
+{
+  service
+      ->async([&conn_mtx, &ses, sql]() {
+        std::lock_guard<std::mutex> l(conn_mtx);
+        try {
+          ses << sql;
+        } catch (...) {
+        }
+      })
+      .get();
 }
 
 void sql_session::listen(const std::string& channel, notify_handler_t handler)
 {
-  // register handler
   {
     std::lock_guard<fibers::mutex> l(notify_mtx);
     notify_handlers[channel] = handler;
   }
 
-  // issue LISTEN command on the DB connection
-  service
-      ->async([ses = soci_session.get(), channel]() {
-        try {
-          *ses << (std::string("LISTEN ") + channel + ";");
-        } catch (...) {
-        }
-      })
-      .get();
+  run_listen_command(service, conn_mtx, *soci_session,
+                     "LISTEN " + channel + ";");
 
-  // start watcher using libpq socket
-  try {
-    auto backend = static_cast<soci::postgresql_session_backend*>(
-        soci_session->get_backend());
-    if (!backend) return;
-    PGconn* conn = backend->conn_;
-    if (!conn) return;
+  // watch libpq's socket for incoming notifications
+  PGconn* conn = pg_conn(*soci_session);
+  if (!conn) return;
+  int sock = PQsocket(conn);
+  if (sock < 0) return;
 
-    int sock = PQsocket(conn);
-    if (sock < 0) return;
+  if (!notify_stream) {
+    notify_stream = make_notify_stream(service->get_io_service(), sock);
+    if (!notify_stream) return;
+  }
+  if (!notify_retry)
+    notify_retry =
+        std::make_unique<asio::steady_timer>(service->get_io_service());
 
-    // create stream if not present
-    if (!notify_stream) {
-      notify_stream = make_notify_stream(service->get_io_service(), sock);
-      if (!notify_stream) return;
+  if (notify_running.exchange(true)) return;
+
+  // Re-arming handler; holds the session weakly so it never outlives it.
+  auto weak_self = std::weak_ptr<sql_session>(shared_from_this());
+  auto handler_ptr =
+      std::make_shared<std::function<void(const boost::system::error_code&)>>();
+
+  *handler_ptr = [weak_self, handler_ptr](const boost::system::error_code& ec) {
+    auto self = weak_self.lock();
+    if (!self) return;  // session destroyed
+    if (ec) {           // cancelled by unlisten
+      self->notify_running = false;
+      return;
     }
 
-    if (notify_running) return;
-    notify_running = true;
+    // A query running on a worker owns the connection; it reads (and then
+    // dispatches) whatever arrives meanwhile. Look again shortly instead of
+    // blocking the service thread. Reading here while the query waits for
+    // its reply used to steal the reply and leave the query hanging.
+    std::unique_lock<std::mutex> busy(self->conn_mtx, std::try_to_lock);
+    if (!busy) {
+      self->notify_retry->expires_after(std::chrono::milliseconds(2));
+      self->notify_retry->async_wait(*handler_ptr);
+      return;
+    }
 
-    // shared, re-entrant handler which uses weak_ptr to avoid touching
-    // the session after it has been destroyed.
-    auto weak_self = std::weak_ptr<sql_session>(shared_from_this());
-    auto handler_ptr = std::make_shared<
-        std::function<void(const boost::system::error_code&)>>();
+    PGconn* conn = pg_conn(*self->soci_session);
+    if (!conn || PQconsumeInput(conn) == 0) {
+      self->notify_running = false;  // connection lost
+      return;
+    }
+    self->dispatch_notifications();
+    busy.unlock();
 
-    *handler_ptr = [weak_self,
-                    handler_ptr](const boost::system::error_code& ec) {
-      auto self = weak_self.lock();
-      if (!self) return;  // session destroyed, abort
+    if (self->notify_stream && self->notify_running)
+      self->notify_stream->async_wait(notify_stream_type::wait_read,
+                                      *handler_ptr);
+  };
 
-      if (ec) {
-        std::lock_guard<fibers::mutex> l(self->notify_mtx);
-        self->notify_running = false;
-        return;
-      }
-
-      // obtain current PGconn from the live session backend
-      PGconn* conn = nullptr;
-      try {
-        auto backend = static_cast<soci::postgresql_session_backend*>(
-            self->soci_session->get_backend());
-        if (backend) conn = backend->conn_;
-      } catch (...) {
-      }
-      if (!conn) {
-        std::lock_guard<fibers::mutex> l(self->notify_mtx);
-        self->notify_running = false;
-        return;
-      }
-
-      if (PQconsumeInput(conn) == 0) {
-        std::lock_guard<fibers::mutex> l(self->notify_mtx);
-        self->notify_running = false;
-        return;
-      }
-
-      PGnotify* n = nullptr;
-      while ((n = PQnotifies(conn)) != nullptr) {
-        std::string ch = n->relname ? n->relname : std::string();
-        std::string payload = n->extra ? n->extra : std::string();
-        PQfreemem(n);
-
-        // copy handler under lock
-        sql_session::notify_handler_t hcopy;
-        {
-          std::lock_guard<fibers::mutex> l(self->notify_mtx);
-          auto it = self->notify_handlers.find(ch);
-          if (it != self->notify_handlers.end()) hcopy = it->second;
-        }
-
-        if (hcopy) {
-          // dispatch via service; get service from locked session
-          auto svc = self->service;
-          if (svc) svc->execute([hcopy, ch, payload]() { hcopy(ch, payload); });
-        }
-      }
-
-      // re-arm async wait using the live session
-      try {
-        if (self->notify_stream && self->notify_running) {
-          self->notify_stream->async_wait(notify_stream_type::wait_read,
-                                          *handler_ptr);
-        }
-      } catch (...) {
-        std::lock_guard<fibers::mutex> l(self->notify_mtx);
-        self->notify_running = false;
-      }
-    };
-
-    // start first wait
-    notify_stream->async_wait(notify_stream_type::wait_read, *handler_ptr);
-  } catch (...) {
-  }
+  notify_stream->async_wait(notify_stream_type::wait_read, *handler_ptr);
 }
 
 void sql_session::unlisten(const std::string& channel)
 {
-  // remove handler
   bool last = false;
   {
     std::lock_guard<fibers::mutex> l(notify_mtx);
@@ -217,15 +234,8 @@ void sql_session::unlisten(const std::string& channel)
     last = notify_handlers.empty();
   }
 
-  // issue UNLISTEN
-  service
-      ->async([ses = soci_session.get(), channel]() {
-        try {
-          *ses << (std::string("UNLISTEN ") + channel + ";");
-        } catch (...) {
-        }
-      })
-      .get();
+  run_listen_command(service, conn_mtx, *soci_session,
+                     "UNLISTEN " + channel + ";");
 
   if (last) unlisten_all();
 }
@@ -237,26 +247,15 @@ void sql_session::unlisten_all()
     notify_handlers.clear();
   }
 
-  // issue UNLISTEN *
-  service
-      ->async([ses = soci_session.get()]() {
-        try {
-          *ses << std::string("UNLISTEN *;");
-        } catch (...) {
-        }
-      })
-      .get();
+  run_listen_command(service, conn_mtx, *soci_session, "UNLISTEN *;");
 
-  // cancel and clear descriptor
-  try {
-    if (notify_stream) {
-      boost::system::error_code ec;
-      notify_stream->cancel(ec);
-      notify_stream.reset();
-    }
-  } catch (...) {
+  // stop the watcher
+  boost::system::error_code ec;
+  if (notify_retry) notify_retry->cancel();
+  if (notify_stream) {
+    notify_stream->cancel(ec);
+    notify_stream.reset();
   }
-  std::lock_guard<fibers::mutex> l(notify_mtx);
   notify_running = false;
 }
 }  // namespace asyik
