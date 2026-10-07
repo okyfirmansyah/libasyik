@@ -487,6 +487,8 @@ TEST_CASE("SQL pool health check renews broken sessions", "[sql]")
 TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
 {
   auto as = asyik::make_service();
+  // phases are logged: a hang on CI showed only that this test was running
+  LOG(INFO) << "LISTEN watcher test: connecting\n";
   auto pool = make_sql_pool(sql_backend_postgresql, admin_conn, 3);
 
   run_in_service(as, [=]() {
@@ -499,6 +501,7 @@ TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
       pool->get_session(as)->query("NOTIFY " + channel + ", 'x'");
     };
 
+    LOG(INFO) << "LISTEN watcher test: listen x and y\n";
     listener->listen("asyik_ch_x", count);
     listener->listen("asyik_ch_y", count);
     notify("asyik_ch_x");
@@ -507,6 +510,7 @@ TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
       return received["asyik_ch_x"] == 1 && received["asyik_ch_y"] == 1;
     }));
 
+    LOG(INFO) << "LISTEN watcher test: unlisten x\n";
     // dropping one channel keeps the watcher running for the other
     listener->unlisten("asyik_ch_x");
     notify("asyik_ch_x");
@@ -515,10 +519,12 @@ TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
     REQUIRE(received["asyik_ch_x"] == 1);
     REQUIRE(listener->notify_running);
 
+    LOG(INFO) << "LISTEN watcher test: unlisten y\n";
     // dropping the last channel cancels the watcher
     listener->unlisten("asyik_ch_y");
     REQUIRE(wait_for([&]() { return !listener->notify_running; }));
 
+    LOG(INFO) << "LISTEN watcher test: listen z, kill backend\n";
     // the watcher stops when the backend goes away...
     listener->listen("asyik_ch_z", count);
     REQUIRE(listener->notify_running);
@@ -526,11 +532,14 @@ TEST_CASE("LISTEN watcher: unlisten and backend loss", "[sql]")
                        "pid = " + std::to_string(backend_pid(listener)));
     REQUIRE(wait_for([&]() { return !listener->notify_running; }));
 
+    LOG(INFO) << "LISTEN watcher test: dead connection\n";
     // ...and LISTEN/UNLISTEN on the dead connection do not throw
     REQUIRE_NOTHROW(listener->listen("asyik_ch_w", count));
     REQUIRE_NOTHROW(listener->unlisten("asyik_ch_w"));
     REQUIRE_NOTHROW(listener->unlisten("asyik_ch_z"));
+    LOG(INFO) << "LISTEN watcher test: done, stopping the service\n";
   });
+  LOG(INFO) << "LISTEN watcher test: service stopped\n";
 }
 
 }  // namespace asyik

@@ -13,6 +13,7 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/url.hpp>
+#include <optional>
 #include <regex>
 #include <string>
 
@@ -299,16 +300,23 @@ http_request_ptr http_easy_request_multipart(
       internal::tls::client_handshake(stream, *ctx, scheme.host());
 
       boost::fibers::future<size_t> is_write_done;
+      // The authenticated retry runs after the catch block, not in it: it
+      // suspends this fiber, and MSVC keeps the exception being handled per
+      // thread, so other fibers throwing meanwhile corrupt it.
+      std::optional<digest_authenticator> challenge;
       try {
         is_write_done = handle_client_request_response(stream, timeout_ms, req,
                                                        scheme, f, !auth);
-      } catch (digest_authenticator& auth) {
-        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
-
+      } catch (digest_authenticator& a) {
+        challenge = a;
+      }
+      if (challenge) {
+        LOG(TRACE) << "digest_authenticator=" << challenge->authorization()
+                   << "\n";
         // data may have been moved into req->body already
-        req = http_easy_request_multipart(
-            as, tls_ctx, timeout_ms, method, url, std::move(req->body),
-            headers, std::forward<F>(f), &auth);
+        req = http_easy_request_multipart(as, tls_ctx, timeout_ms, method, url,
+                                          std::move(req->body), headers,
+                                          std::forward<F>(f), &*challenge);
       }
       try {
         is_write_done.get();
@@ -328,16 +336,23 @@ http_request_ptr http_easy_request_multipart(
       internal::socket::async_connect(stream, results).get();
 
       boost::fibers::future<size_t> is_write_done;
+      // The authenticated retry runs after the catch block, not in it: it
+      // suspends this fiber, and MSVC keeps the exception being handled per
+      // thread, so other fibers throwing meanwhile corrupt it.
+      std::optional<digest_authenticator> challenge;
       try {
         is_write_done = handle_client_request_response(stream, timeout_ms, req,
                                                        scheme, f, !auth);
-      } catch (digest_authenticator& auth) {
-        LOG(TRACE) << "digest_authenticator=" << auth.authorization() << "\n";
-
+      } catch (digest_authenticator& a) {
+        challenge = a;
+      }
+      if (challenge) {
+        LOG(TRACE) << "digest_authenticator=" << challenge->authorization()
+                   << "\n";
         // data may have been moved into req->body already
-        req = http_easy_request_multipart(
-            as, tls_ctx, timeout_ms, method, url, std::move(req->body),
-            headers, std::forward<F>(f), &auth);
+        req = http_easy_request_multipart(as, tls_ctx, timeout_ms, method, url,
+                                          std::move(req->body), headers,
+                                          std::forward<F>(f), &*challenge);
       }
 
       beast::error_code ec;
@@ -490,6 +505,8 @@ void http_connection<StreamType>::start()
         // flag to ignore eos error since work has been
         // done anyway
         bool safe_to_close = false;
+        // set when the request exceeded a limit: answered with 413
+        std::optional<std::string> too_large;
 
         try {
           ip::tcp::no_delay option(true);
@@ -676,17 +693,10 @@ void http_connection<StreamType>::start()
         }
         // TODO: all HTTP 5xx and 4xx handling should be put here instead
         catch (overflow_error& e) {
-          http_beast_response beast_response;
-          beast_response.body() = e.what();
-          beast_response.keep_alive(false);
-          beast_response.result(413);
-
-          beast_response.prepare_payload();
-          http::serializer<false, http::string_body> sr{beast_response};
-          asyik::internal::http::async_write(p->get_stream(), beast_response)
-              .get();
-
-          p->shutdown_ssl();
+          // answered below: writing suspends this fiber, which must not
+          // happen inside a catch block (MSVC tracks the exception being
+          // handled per thread, and other fibers may throw meanwhile)
+          too_large = e.what();
         } catch (asyik::already_closed_error& e) {
           if (!safe_to_close) {
             LOG(WARNING) << "End of stream exception is catched during client "
@@ -698,6 +708,21 @@ void http_connection<StreamType>::start()
               << "exception is catched during client connection, reason: "
               << e.what() << "\n";
         };
+
+        if (too_large) {
+          try {
+            http_beast_response beast_response;
+            beast_response.body() = *too_large;
+            beast_response.keep_alive(false);
+            beast_response.result(413);
+            beast_response.prepare_payload();
+            asyik::internal::http::async_write(p->get_stream(), beast_response)
+                .get();
+            p->shutdown_ssl();
+          } catch (std::exception&) {
+            // the client is gone already
+          }
+        }
       });
     };
   };
