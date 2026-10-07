@@ -55,8 +55,8 @@ bool valid_cache_value(const std::string& key, const std::string& v)
 
 SOAK_SCENARIO(memcache_mt, "memcache.mt_churn",
               "make_memcache_mt shared by fibers of two services and plain "
-              "threads: put/get/at/erase on few keys with a 1s expiry; every "
-              "value read must be intact")
+              "threads: put/get/at/try_get/get_or_put/visit/erase on few keys "
+              "with a 1s expiry; every value read must be intact")
 {
   soak::service_thread a_thread, b_thread;
   auto a = a_thread.get(), b = b_thread.get();
@@ -72,7 +72,7 @@ SOAK_SCENARIO(memcache_mt, "memcache.mt_churn",
       for (int i = 0; i < 2000; i++) {
         std::string key = "k" + std::to_string(rng() % 16);
         try {
-          switch (rng() % 5) {
+          switch (rng() % 8) {
             case 0:
             case 1:
               cache->put(key, cache_value(key, version++, rng() % 200));
@@ -96,6 +96,35 @@ SOAK_SCENARIO(memcache_mt, "memcache.mt_churn",
               cache->erase(key);
               ctx.count("erase");
               break;
+            case 5:
+              if (auto v = cache->try_get(key)) {
+                SOAK_CHECK(
+                    ctx, valid_cache_value(key, *v),
+                    "corrupted value from try_get(): " + v->substr(0, 60));
+                ctx.count("try_get hit");
+              } else {
+                ctx.count("try_get miss");
+              }
+              break;
+            case 6: {
+              std::string v = cache->get_or_put(key, [&]() {
+                return cache_value(key, version++, rng() % 200);
+              });
+              SOAK_CHECK(
+                  ctx, valid_cache_value(key, v),
+                  "corrupted value from get_or_put(): " + v.substr(0, 60));
+              ctx.count("get_or_put");
+              break;
+            }
+            case 7: {
+              bool seen = cache->visit(key, [&](std::string& v) {
+                SOAK_CHECK(ctx, valid_cache_value(key, v),
+                           "corrupted value in visit()");
+                v += 'x';  // still a valid value
+              });
+              ctx.count(seen ? "visit hit" : "visit miss");
+              break;
+            }
           }
         } catch (std::out_of_range&) {
           ctx.count("miss");

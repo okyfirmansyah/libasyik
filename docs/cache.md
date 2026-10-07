@@ -38,23 +38,53 @@ as->execute([cache, as]()
 as->run();
 ```
 
-#### Multithread-safe Cache
-The example above use **make_memcache()** to generate cache instance that expected to only be accessed from **single thread** only, that is the same thread containing the **as->run()** main loop.
+#### API
 
-In order to create cache that is safe to be accessed in any thread, you can use **make_memcache_mt()**:
+| Call | Result |
+|---|---|
+| `put(k, v)` | stores `v` (copied or moved) with a fresh lifetime, replacing any previous value |
+| `get(k)` | the value, lifetime extended; throws `std::out_of_range` when missing or expired |
+| `at(k)` | like `get()` but leaves the lifetime alone |
+| `try_get(k)` | `std::optional` copy of the value (lifetime extended), `std::nullopt` when missing |
+| `contains(k)` | whether `k` is present and not expired (lifetime left alone) |
+| `get_or_put(k, make)` | the value (lifetime extended); stores `make()` first when missing |
+| `visit(k, f)` | calls `f(value&)` under the cache lock when present; returns whether it was |
+| `erase(k)` | removes `k`; returns whether it was there |
+| `clear()` | removes everything |
+| `size()` | number of entries that have not expired |
+
+```c++
+auto cache = asyik::make_memcache<std::string, std::string, 60>(as);
+
+if (auto v = cache->try_get("user:42"))  // no exception on a miss
+  use(*v);
+
+// load once, then serve from the cache
+auto profile = cache->get_or_put("user:42", [&]() { return load_profile(42); });
+```
+
+#### Multithread-safe Cache
+The example above uses **make_memcache()**, whose instance may only be used from the thread running its service (the one calling **as->run()**). Its `get()`/`at()`/`get_or_put()` return references to the stored value.
+
+To use a cache from any thread (other services, `as->async()` workers, plain threads), create it with **make_memcache_mt()**:
 ```c++
 auto as = asyik::make_service();
 // thread-safe cache
 auto cache = asyik::make_memcache_mt<std::string, int, 1, 50>(as);
 
-as->async([cache, as]() // it is now safe to use async(will be performed in worker thread)
+as->async([cache, as]() // safe from a worker thread
 {
-  // insert few datas
   cache->put("1", 1);
+  int one = cache->get("1");          // a copy
+  cache->visit("1", [](int& v) { v++; });  // in-place change under the lock
   ...
 });
 
 as->run();
 ```
 
-The cache will have internal mutex/locking to allow multi-thread access possible. Consequently, the item expiration mechanism can be performed in any thread, regardless of which thread the cache is created, or which thread that put the item. So the item's destructor can be called from anywhere.
+Every call takes the cache's internal lock (a `boost::fibers::mutex`, so a fiber waiting for it yields instead of blocking its thread). Because another thread may replace, move or expire an entry as soon as the lock is released, `get()`, `at()` and `get_or_put()` return a **copy** made under the lock instead of a reference. To change a value in place, or to read a value that cannot be copied (e.g. `std::unique_ptr`), use `visit()`, which runs the callback under the lock.
+
+`get_or_put()` looks up and inserts in one step: when several threads ask for the same missing key, `make()` runs once and they all get its result. `make()` runs under the cache lock, so keep it short.
+
+Entries expire, and their destructors run, on whichever thread happens to prune the cache.

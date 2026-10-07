@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -350,4 +351,78 @@ TEST_CASE("multi-thread memcache hands out copies, and visit()")
     REQUIRE(seen == 7);
   });
   as->run();
+}
+
+TEST_CASE("memcache lookups without exceptions, get_or_put, size")
+{
+  auto as = asyik::make_service();
+  auto single = asyik::make_memcache<std::string, std::string, 5>(as);
+  auto multi = asyik::make_memcache_mt<std::string, std::string, 5>(as);
+
+  as->execute([&]() {
+    struct stopper {
+      asyik::service_ptr as;
+      ~stopper() { as->stop(); }
+    } stop_on_exit{as};
+
+    auto check = [](auto& cache) {
+      // put() takes lvalues too
+      std::string value = "v1";
+      cache->put("a", value);
+      REQUIRE(value == "v1");
+      REQUIRE(cache->contains("a"));
+      REQUIRE(!cache->contains("b"));
+
+      REQUIRE(cache->try_get("a") == std::optional<std::string>("v1"));
+      REQUIRE(!cache->try_get("b"));
+
+      // get_or_put: existing value wins, missing one is created
+      int made = 0;
+      auto make = [&made]() {
+        made++;
+        return std::string("made");
+      };
+      REQUIRE(cache->get_or_put("a", make) == "v1");
+      REQUIRE(cache->get_or_put("b", make) == "made");
+      REQUIRE(cache->get_or_put("b", make) == "made");
+      REQUIRE(made == 1);
+
+      REQUIRE(cache->size() == 2);
+      REQUIRE(cache->erase("a"));
+      REQUIRE(!cache->erase("a"));
+      REQUIRE(cache->size() == 1);
+      cache->clear();
+      REQUIRE(cache->size() == 0);
+    };
+    check(single);
+    check(multi);
+
+    // single-thread get_or_put() hands out the stored value itself
+    single->get_or_put("ref", []() { return std::string("x"); }) += "y";
+    REQUIRE(single->at("ref") == "xy");
+  });
+  as->run();
+}
+
+TEST_CASE("multi-thread memcache get_or_put creates each value once")
+{
+  auto as = asyik::make_service();
+  auto cache = asyik::make_memcache_mt<int, int, 5>(as);
+  std::atomic<int> made{0};
+
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; t++)
+    threads.emplace_back([&]() {
+      for (int i = 0; i < 2000; i++) {
+        int key = i % 50;
+        int v = cache->get_or_put(key, [&made, key]() {
+          made++;
+          return key * 10;
+        });
+        if (v != key * 10) made += 1000;  // wrong value: fail below
+      }
+    });
+  for (auto& t : threads) t.join();
+  REQUIRE(made == 50);
+  REQUIRE(cache->size() == 50);
 }

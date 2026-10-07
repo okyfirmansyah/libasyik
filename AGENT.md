@@ -368,10 +368,13 @@ server->on_http_request("/api/<path>", "GET", [limiter](auto req, auto args) {
 auto cache = asyik::make_memcache<std::string, std::string, 60, 4>(as);
 
 cache->put("key", "value");
-auto val = cache->get("key");  // extends TTL
+auto val = cache->get("key");      // extends TTL; throws std::out_of_range if missing
+if (auto v = cache->try_get("key")) { /* *v */ }  // no exception on a miss
+auto p = cache->get_or_put("key", []() { return std::string("loaded"); });
 cache->erase("key");
 
-// Thread-safe variant (uses fibers::mutex internally)
+// Thread-safe variant (uses fibers::mutex internally). get()/at()/
+// get_or_put() return copies here; use visit(key, f) to change in place.
 auto mt_cache = asyik::make_memcache_mt<std::string, std::string, 60, 4>(as);
 ```
 
