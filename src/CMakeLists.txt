@@ -42,11 +42,20 @@ if(LIBASYIK_ENABLE_SOCI)
     add_definitions("-DLIBASYIK_ENABLE_SOCI=${LIBASYIK_ENABLE_SOCI}")
     target_sources(${PROJECT_NAME} PRIVATE sql.cpp)
     if(SOCI_FOUND)
-        target_link_libraries(${PROJECT_NAME} SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
+        # SOCI 4.1 renamed its exported targets (SOCI::soci_core became
+        # SOCI::Core, and so on); accept both.
+        if(TARGET SOCI::Core)
+            set(LIBASYIK_SOCI_CORE SOCI::Core)
+            set(LIBASYIK_SOCI_BACKENDS SOCI::PostgreSQL SOCI::SQLite3)
+        else()
+            set(LIBASYIK_SOCI_CORE SOCI::soci_core)
+            set(LIBASYIK_SOCI_BACKENDS SOCI::soci_postgresql SOCI::soci_sqlite3)
+        endif()
+        target_link_libraries(${PROJECT_NAME} ${LIBASYIK_SOCI_CORE} ${LIBASYIK_SOCI_BACKENDS})
         # sql.hpp is public and includes SOCI headers without the soci/
         # prefix; locate them relative to the imported target (e.g.
         # /usr/local/include/soci, vcpkg's include/soci)
-        get_target_property(SOCI_INCLUDE_ROOT SOCI::soci_core INTERFACE_INCLUDE_DIRECTORIES)
+        get_target_property(SOCI_INCLUDE_ROOT ${LIBASYIK_SOCI_CORE} INTERFACE_INCLUDE_DIRECTORIES)
         list(GET SOCI_INCLUDE_ROOT 0 SOCI_INCLUDE_ROOT)
         target_include_directories(${PROJECT_NAME} PUBLIC
             ${SOCI_INCLUDE_ROOT}/soci
