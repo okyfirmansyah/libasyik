@@ -1,11 +1,17 @@
 // HTTP client/server edge cases: handler failures, multipart responses split
 // over several writes or malformed, WebSocket upgrade errors, invalid URLs.
-// Uses ports 4310-4313.
+// Uses ports 4310-4314.
 
 #include "catch2/catch.hpp"
 #include "libasyik/http.hpp"
 #include "libasyik/service.hpp"
 #include "test_tls_util.hpp"
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 using namespace asyik;
 using namespace asyik_test;
@@ -232,3 +238,71 @@ TEST_CASE("Pipelined requests are all answered", "[http]")
     REQUIRE(second < third);
   });
 }
+
+#ifndef _WIN32
+namespace {
+
+// Uses up every file descriptor the process may open, until release().
+class descriptor_exhaustion {
+ public:
+  descriptor_exhaustion()
+  {
+    getrlimit(RLIMIT_NOFILE, &original_);
+    rlimit low = original_;
+    if (low.rlim_cur > 1024) low.rlim_cur = 1024;
+    setrlimit(RLIMIT_NOFILE, &low);
+    for (int fd; (fd = open("/dev/null", O_RDONLY)) >= 0;) fds_.push_back(fd);
+  }
+  ~descriptor_exhaustion() { release(); }
+
+  void release()
+  {
+    for (int fd : fds_) close(fd);
+    fds_.clear();
+    setrlimit(RLIMIT_NOFILE, &original_);
+  }
+
+ private:
+  rlimit original_{};
+  std::vector<int> fds_;
+};
+
+}  // namespace
+
+TEST_CASE("The server keeps accepting after running out of file descriptors",
+          "[http]")
+{
+  auto as = make_service();
+  auto server = make_http_server(as, "127.0.0.1", 4314);
+  server->on_http_request("/ok",
+                          [](http_request_ptr req, const http_route_args&) {
+                            req->response.body = "fine";
+                            req->response.result(200);
+                          });
+
+  run_client(as, server, [=]() {
+    // opened first: connecting needs no new descriptor, but accepting does
+    asio::ip::tcp::socket queued(as->get_io_service());
+    queued.open(asio::ip::tcp::v4());
+
+    descriptor_exhaustion exhaustion;
+    queued
+        .async_connect({asio::ip::make_address("127.0.0.1"), 4314},
+                       use_fiber_future)
+        .get();
+    asyik::sleep_for(std::chrono::milliseconds(250));  // accept fails meanwhile
+    exhaustion.release();
+
+    // an exception here would end the fiber without failing the test
+    std::string body;
+    try {
+      body = http_easy_request(as, 3000, "GET", "http://127.0.0.1:4314/ok", "",
+                               {})
+                 ->response.body;
+    } catch (std::exception& e) {
+      body = e.what();
+    }
+    REQUIRE(body == "fine");
+  });
+}
+#endif

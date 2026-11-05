@@ -16,8 +16,6 @@ HTTP:
 -http test network negative case(host not found, dns not found, no connection, timeouts)
 -ability for http/s server to override nefative handling(route not found, payload too large, etc)
 -make http full client(separate connection and request)
--server stops accepting for good after a single async_accept error
- (e.g. EMFILE); re-arm the accept loop on transient errors
 -plain HTTP server has no idle/read timeout for keep-alive connections
 -clients disconnecting right after the TLS handshake are logged at WARNING
  (Windows reports them as resets); lower to DEBUG

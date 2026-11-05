@@ -272,6 +272,7 @@ class http_server
 
  private:
   void start_accept(asio::io_context& io_service);
+  void retry_accept_later(asio::io_context& io_service);
 
   /// Register a freshly-accepted connection so that close() can reach it.
   /// Opportunistically prunes expired weak_ptrs to keep the vector bounded.

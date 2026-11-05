@@ -8,6 +8,7 @@
 #include <boost/any.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/stream.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
@@ -754,21 +755,49 @@ void http_server<StreamType>::start_accept(asio::io_context& io_service)
       asio::make_strand(io_service),
       [p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
           const boost::system::error_code& error, tcp::socket socket) {
-        if (!p.expired() && !error) {
-          auto ps = p.lock();
+        auto ps = p.lock();
+        if (!ps) return;
+        if (error == asio::error::operation_aborted ||
+            !ps->acceptor->is_open()) {
+          LOG(INFO) << "accept loop stopped\n";
+          return;
+        }
+        auto service = ps->service.lock();
+        if (!service) return;
+
+        if (error) {
+          LOG(WARNING) << "async_accept error m=" << error.message() << "\n";
+          // a client that gave up says nothing about the server, whereas the
+          // others (EMFILE, ENOMEM...) leave the connection queued, so retrying
+          // at once would spin until resources are back
+          if (error != asio::error::connection_aborted) {
+            ps->retry_accept_later(service->get_io_service());
+            return;
+          }
+        } else {
           auto new_connection = ps->conn_pool_->acquire(
               typename http_connection<StreamType>::private_{},
               std::move(socket), ps);
           ps->register_connection(new_connection);
           new_connection->start();
-          if (!ps->service.expired()) {
-            auto service = ps->service.lock();
-            ps->start_accept(service->get_io_service());
-          }
-        } else {
-          LOG(WARNING) << "async_accept error or canceled m=" << error.message()
-                       << "\n";
         }
+        ps->start_accept(service->get_io_service());
+      });
+}
+
+template <typename StreamType>
+void http_server<StreamType>::retry_accept_later(asio::io_context& io_service)
+{
+  auto timer = std::make_shared<asio::steady_timer>(
+      io_service, std::chrono::milliseconds(100));
+  timer->async_wait(
+      [timer,
+       p = std::weak_ptr<http_server<StreamType>>(this->shared_from_this())](
+          const boost::system::error_code& error) {
+        auto ps = p.lock();
+        if (!ps || error || !ps->acceptor->is_open()) return;
+        if (auto service = ps->service.lock())
+          ps->start_accept(service->get_io_service());
       });
 }
 }  // namespace asyik
