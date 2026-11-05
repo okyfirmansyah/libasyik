@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 project(libasyik)
 
+# CMAKE_INSTALL_INCLUDEDIR and CMAKE_INSTALL_LIBDIR, used by install() below
+include(GNUInstallDirs)
+
 SET(LIBASYIK_ENABLE_SOCI ON CACHE BOOL "Libasyik Enable SOCI")
 SET(LIBASYIK_ENABLE_SSL_SERVER ON CACHE BOOL "Libasyik Enable SSL/HTTPS Server Support")
 
