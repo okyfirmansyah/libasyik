@@ -217,7 +217,7 @@ target_link_libraries(${PROJECT_NAME} libasyik)
 Libasyik can also be built as part of your project, e.g. as a git submodule:
 ```
 set(LIBASYIK_ENABLE_SOCI OFF CACHE BOOL "" FORCE) # if no database support is needed
-add_subdirectory(external/libasyik)
+add_subdirectory(external/libasyik) # its tests are not built unless LIBASYIK_BUILD_TESTS=ON
 target_link_libraries(${PROJECT_NAME} libasyik)
 ```
 ---

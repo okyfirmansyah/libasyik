@@ -22,9 +22,21 @@ if(LIBASYIK_ENABLE_COVERAGE AND NOT MSVC)
     set(LIBASYIK_COVERAGE_FLAGS -O0 -g --coverage -fprofile-update=atomic)
 endif()
 
-add_subdirectory(external/Catch2)
 add_subdirectory(src)
-add_subdirectory(tests)
+
+# Unit tests, with the bundled Catch2 (the SQL cases need a PostgreSQL server).
+# On by default only when libasyik is the top-level project, not when it is
+# pulled in with add_subdirectory() or FetchContent.
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(LIBASYIK_IS_TOP_LEVEL ON)
+else()
+    set(LIBASYIK_IS_TOP_LEVEL OFF)
+endif()
+option(LIBASYIK_BUILD_TESTS "Build the libasyik_test executable and the bundled Catch2" ${LIBASYIK_IS_TOP_LEVEL})
+if(LIBASYIK_BUILD_TESTS)
+    add_subdirectory(external/Catch2)
+    add_subdirectory(tests)
+endif()
 
 # Optional soak (long-running stability) test executable, run locally:
 #   cmake -DLIBASYIK_BUILD_SOAK=ON ..  &&  ./tests/soak/libasyik_soak --help
