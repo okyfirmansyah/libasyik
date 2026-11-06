@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
-project(libasyik)
+
+# include/libasyik/version.hpp is the one place the version is set
+file(STRINGS ${CMAKE_CURRENT_LIST_DIR}/include/libasyik/version.hpp LIBASYIK_VERSION_DEFINES
+     REGEX "#define LIBASYIK_VERSION_(MAJOR|MINOR|PATCH) ")
+string(REGEX REPLACE "[^;]*_(MAJOR|MINOR|PATCH) +([0-9]+)" "\\2" LIBASYIK_VERSION_PARTS "${LIBASYIK_VERSION_DEFINES}")
+string(REPLACE ";" "." LIBASYIK_VERSION "${LIBASYIK_VERSION_PARTS}")
+project(libasyik VERSION ${LIBASYIK_VERSION})
 
 # CMAKE_INSTALL_INCLUDEDIR and CMAKE_INSTALL_LIBDIR, used by install() below
 include(GNUInstallDirs)
@@ -72,11 +78,28 @@ install(
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/external/"
 )
 
+# The config finds libasyik's dependencies for the consumer, which depend on
+# the build options; the version file makes find_package(libasyik 1.10) work.
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    ${PROJECT_NAME}-config.cmake.in
+    ${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+)
+write_basic_package_version_file(
+    ${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+    COMPATIBILITY SameMajorVersion
+)
 install(
-    FILES ${PROJECT_NAME}-config.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+    FILES ${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+          ${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
 )
 
+# Not libasyik.cmake: the exported file loads its per-configuration parts with
+# a libasyik-*.cmake glob, which would pick up the config files above too
 install(
     EXPORT ${PROJECT_NAME}
+    FILE ${PROJECT_NAME}-targets.cmake
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
 )

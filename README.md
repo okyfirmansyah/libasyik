@@ -205,11 +205,8 @@ project(test_asyik)
 
 add_executable(${PROJECT_NAME} test.cpp) # add more source code here
 
-# libasyik's own dependencies must be found before libasyik itself
-find_package(Boost COMPONENTS context fiber date_time url REQUIRED)
-find_package(OpenSSL REQUIRED)
-find_package(Threads REQUIRED)
-find_package(SOCI REQUIRED) # only if libasyik was built with SOCI support
+# also finds libasyik's own dependencies (Boost, OpenSSL, Threads, and SOCI
+# if libasyik was built with it)
 find_package(libasyik REQUIRED)
 
 # brings in libasyik's include paths (including aixlog, cppcodec and SOCI),

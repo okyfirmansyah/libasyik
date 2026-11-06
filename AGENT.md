@@ -458,12 +458,10 @@ LOG(ERROR) << "bad thing\n";
 cmake_minimum_required(VERSION 3.14)
 project(my_service)
 
-find_package(libasyik REQUIRED)
-find_package(Boost COMPONENTS context fiber date_time url REQUIRED)
-find_package(Threads REQUIRED)
+find_package(libasyik REQUIRED)  # also finds Boost, OpenSSL, Threads, SOCI
 
 add_executable(my_service main.cpp)
-target_link_libraries(my_service libasyik Boost::fiber Boost::context Threads::Threads)
+target_link_libraries(my_service libasyik)
 
 # Optional: enable SOCI database support
 # SET(LIBASYIK_ENABLE_SOCI ON)
